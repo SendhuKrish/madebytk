@@ -369,102 +369,32 @@
             </div>
         </div>
 
-        <!-- Settings -->
+        <!-- Upload Bet Slip -->
         <div class="admin-section">
-            <h3>⚙️ Settings</h3>
-            <div class="api-key-row">
-                <div class="form-group">
-                    <label>Anthropic API Key (for bet slip OCR)</label>
-                    <input type="password" id="apiKey" placeholder="sk-ant-...">
-                </div>
-                <button class="btn btn-primary" id="saveApiKey" style="margin-bottom:0;height:38px;">Save</button>
+            <h3>📸 Upload Bet Slip</h3>
+            <div class="upload-zone" id="uploadZone">
+                <input type="file" accept="image/*" id="betImageInput">
+                <div class="icon">📸</div>
+                <p>Drop bet slip image here or click to upload</p>
+                <p class="hint">Supports ordinary bets, System 7, 8, 9, 10, 11, 12</p>
             </div>
-            <div class="api-key-row">
-                <div class="form-group">
-                    <label>Toto Predictor API Endpoint</label>
-                    <input type="text" id="predictorUrl" placeholder="https://your-api.com/predict">
-                </div>
-                <button class="btn btn-primary" id="savePredictorUrl" style="margin-bottom:0;height:38px;">Save</button>
-            </div>
-            <div class="status-msg" id="settingsStatus"></div>
-        </div>
-
-        <!-- New Draw -->
-        <div class="admin-section">
-            <h3>📝 Add / Edit Draw</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Draw Date</label>
-                    <input type="date" id="drawDate">
-                </div>
-                <div class="form-group">
-                    <label>Draw Number</label>
-                    <input type="text" id="drawNumber" placeholder="e.g. 3850">
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label>Predictions (one set per line, comma-separated)</label>
-                <textarea id="predInput" placeholder="1, 12, 23, 34, 40, 49&#10;5, 10, 15, 20, 30, 45"></textarea>
+            <div class="upload-preview" id="uploadPreview">
+                <img id="previewImg" src="" alt="Bet slip preview">
             </div>
             <div class="btn-row">
-                <button class="btn-outline-sm" id="fetchPredictions">🔮 Fetch from Predictor API</button>
+                <button class="btn btn-primary" id="extractBetsBtn" style="display:none;">🤖 Extract Bets with Claude</button>
             </div>
-            <div class="status-msg" id="predStatus"></div>
-
-            <!-- Bets — Image Upload -->
-            <div style="margin-top:1.5rem;">
-                <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);display:block;margin-bottom:.5rem;">Bets — Upload Bet Slip Image</label>
-                <div class="upload-zone" id="uploadZone">
-                    <input type="file" accept="image/*" id="betImageInput" multiple>
-                    <div class="icon">📸</div>
-                    <p>Drop bet slip image here or click to upload</p>
-                    <p class="hint">Supports ordinary bets, System 7, 8, 9, 10, 11, 12</p>
-                </div>
-                <div class="upload-preview" id="uploadPreview">
-                    <img id="previewImg" src="" alt="Bet slip preview">
-                </div>
-                <div class="btn-row">
-                    <button class="btn btn-primary" id="extractBetsBtn" style="display:none;">🤖 Extract Bets with Claude</button>
-                </div>
-                <div class="status-msg" id="ocrStatus"></div>
-                <div class="extracted-bets" id="extractedBets">
-                    <h4>✓ Extracted Bets</h4>
-                    <div id="extractedList"></div>
-                </div>
-            </div>
-
-            <!-- Manual Bets -->
-            <div style="margin-top:1.5rem;">
-                <label style="font-size:.8rem;font-weight:600;color:var(--text-dim);display:block;margin-bottom:.5rem;">Or Add Bets Manually</label>
-                <div id="manualBetsContainer"></div>
-                <div class="btn-row">
-                    <button class="btn-outline-sm" id="addBetRow">+ Add Bet</button>
-                </div>
-            </div>
-
-            <!-- Results -->
-            <div style="margin-top:1.5rem;">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Winning Numbers (6 numbers, comma-separated)</label>
-                        <input type="text" id="resultNumbers" placeholder="3, 15, 22, 31, 40, 47">
-                    </div>
-                    <div class="form-group">
-                        <label>Additional Number</label>
-                        <input type="text" id="resultAdditional" placeholder="28">
-                    </div>
-                </div>
-                <div class="btn-row">
-                    <button class="btn-outline-sm" id="fetchResults">🌐 Fetch from Singapore Pools</button>
-                </div>
-                <div class="status-msg" id="resultStatus"></div>
+            <div class="status-msg" id="ocrStatus"></div>
+            <div class="extracted-bets" id="extractedBets">
+                <h4>✓ Extracted Data</h4>
+                <div id="extractedInfo"></div>
+                <div id="extractedList"></div>
             </div>
 
             <div class="btn-row" style="margin-top:1.5rem;">
-                <button class="btn btn-success" id="saveDraw">💾 Save Draw</button>
+                <button class="btn btn-success" id="saveDraw" style="display:none;">💾 Save Draw</button>
                 <button class="btn btn-danger" id="deleteDraw" style="display:none;">🗑 Delete Draw</button>
-                <button class="btn-outline-sm" id="clearForm">Clear Form</button>
+                <button class="btn-outline-sm" id="clearForm">Clear</button>
             </div>
             <div class="status-msg" id="saveStatus"></div>
         </div>
@@ -751,12 +681,6 @@
             $('navBackBtn').onclick = () => showPublic();
             $('navLogoutBtn').onclick = async () => { await supabase.auth.signOut(); currentUser = null; showPublic(); };
 
-            // Load settings
-            const apiKey = await getSetting('anthropic_api_key');
-            const predUrl = await getSetting('predictor_url');
-            $('apiKey').value = apiKey || '';
-            $('predictorUrl').value = predUrl || '';
-
             await renderAdminDrawList();
             resetForm();
         }
@@ -775,58 +699,11 @@
         }
 
         /* ═══════════════════════════
-           ADMIN — Settings (Supabase)
+           ADMIN — Image OCR (Backend)
         ═══════════════════════════ */
-        $('saveApiKey').onclick = async () => {
-            const ok = await setSetting('anthropic_api_key', $('apiKey').value.trim());
-            showStatus('settingsStatus', ok ? 'success' : 'error', ok ? 'API key saved securely' : 'Failed to save');
-        };
-        $('savePredictorUrl').onclick = async () => {
-            const ok = await setSetting('predictor_url', $('predictorUrl').value.trim());
-            showStatus('settingsStatus', ok ? 'success' : 'error', ok ? 'Predictor URL saved' : 'Failed to save');
-        };
-
-        /* ═══════════════════════════
-           ADMIN — Manual Bets
-        ═══════════════════════════ */
-        let manualBets = [];
-
-        function addManualBetRow(type='Ordinary', numbers='') {
-            manualBets.push({ type, numbers });
-            const div = document.createElement('div');
-            div.className = 'form-row';
-            div.style.marginBottom = '.5rem';
-            div.innerHTML = `
-                <div class="form-group" style="margin:0;">
-                    <select style="padding:.5rem .7rem;font-size:.82rem;">
-                        ${['Ordinary','System 7','System 8','System 9','System 10','System 11','System 12']
-                            .map(t => `<option ${t===type?'selected':''}>${t}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-group" style="margin:0;display:flex;gap:.5rem;">
-                    <input value="${numbers}" placeholder="1, 12, 23, 34, 40, 49" style="padding:.5rem .7rem;font-size:.82rem;">
-                    <button class="btn-outline-sm" onclick="this.closest('.form-row').remove()" style="flex-shrink:0;">✕</button>
-                </div>`;
-            $('manualBetsContainer').appendChild(div);
-        }
-
-        $('addBetRow').onclick = () => addManualBetRow();
-
-        function collectManualBets() {
-            const rows = $('manualBetsContainer').querySelectorAll('.form-row');
-            const bets = [];
-            rows.forEach(row => {
-                const type = row.querySelector('select').value;
-                const nums = parseNumbers(row.querySelector('input').value);
-                if (nums.length >= 6) bets.push({ type, numbers: nums });
-            });
-            return bets;
-        }
-
-        /* ═══════════════════════════
-           ADMIN — Image OCR (Claude)
-        ═══════════════════════════ */
-        let uploadedImageBase64 = null;
+        let uploadedFile = null;
+        let extractedData = null;
+        let editingDrawId = null;
 
         const uploadZone = $('uploadZone');
         uploadZone.ondragover = e => { e.preventDefault(); uploadZone.classList.add('dragover'); };
@@ -840,70 +717,43 @@
         };
 
         function handleImageFile(file) {
+            uploadedFile = file;
             const reader = new FileReader();
             reader.onload = e => {
-                uploadedImageBase64 = e.target.result;
-                $('previewImg').src = uploadedImageBase64;
+                $('previewImg').src = e.target.result;
                 $('uploadPreview').style.display = 'block';
                 $('extractBetsBtn').style.display = 'inline-flex';
                 $('extractedBets').style.display = 'none';
+                $('saveDraw').style.display = 'none';
+                extractedData = null;
             };
             reader.readAsDataURL(file);
         }
 
         $('extractBetsBtn').onclick = async () => {
-            const apiKey = await getSetting('anthropic_api_key');
-            if (!apiKey) {
-                showStatus('ocrStatus', 'error', 'Set your Anthropic API key in Settings first.');
-                return;
-            }
-            if (!uploadedImageBase64) return;
+            if (!uploadedFile) return;
 
-            showStatus('ocrStatus', 'loading', 'Extracting bets from image with Claude Vision...');
+            showStatus('ocrStatus', 'loading', 'Extracting bets from image...');
 
             try {
-                const base64Data = uploadedImageBase64.split(',')[1];
-                const mediaType = uploadedImageBase64.split(';')[0].split(':')[1];
+                const formData = new FormData();
+                formData.append('image', uploadedFile);
 
-                const response = await fetch('https://api.anthropic.com/v1/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': apiKey,
-                        'anthropic-version': '2023-06-01',
-                        'anthropic-dangerous-direct-browser-access': 'true'
-                    },
-                    body: JSON.stringify({
-                        model: 'claude-sonnet-4-20250514',
-                        max_tokens: 1024,
-                        messages: [{
-                            role: 'user',
-                            content: [
-                                { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } },
-                                { type: 'text', text: `Extract all Singapore Toto bet numbers from this bet slip image.
+                const response = await fetch('/api/extract-bets', { method: 'POST', body: formData });
 
-For each bet, identify:
-1. The bet type: "Ordinary" (6 numbers), "System 7" (7 numbers), "System 8" (8 numbers), "System 9" (9 numbers), "System 10" (10 numbers), "System 11" (11 numbers), or "System 12" (12 numbers).
-2. The numbers selected.
+                if (!response.ok) {
+                    const err = await response.json();
+                    throw new Error(err.detail || 'Server error');
+                }
 
-Return ONLY valid JSON in this exact format, no other text:
-[
-  {"type": "Ordinary", "numbers": [1, 12, 23, 34, 40, 49]},
-  {"type": "System 7", "numbers": [3, 10, 15, 22, 33, 41, 48]}
-]` }
-                            ]
-                        }]
-                    })
-                });
+                extractedData = await response.json();
+                const bets = extractedData.bets || [];
 
-                const data = await response.json();
-                if (data.error) throw new Error(data.error.message);
-
-                const text = data.content[0].text;
-                const jsonMatch = text.match(/\[[\s\S]*\]/);
-                if (!jsonMatch) throw new Error('Could not parse bets from response');
-
-                const bets = JSON.parse(jsonMatch[0]);
+                // Show extracted info
+                let infoHtml = '';
+                if (extractedData.draw_date) infoHtml += `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem;">Draw Date: <strong style="color:var(--text);">${extractedData.draw_date}</strong></p>`;
+                if (extractedData.draw_number) infoHtml += `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.5rem;">Draw #: <strong style="color:var(--text);">${extractedData.draw_number}</strong></p>`;
+                $('extractedInfo').innerHTML = infoHtml;
 
                 $('extractedList').innerHTML = bets.map(bet =>
                     `<div class="extracted-bet-item">
@@ -914,69 +764,42 @@ Return ONLY valid JSON in this exact format, no other text:
                     </div>`
                 ).join('');
                 $('extractedBets').style.display = 'block';
-
-                // Populate manual bets area
-                $('manualBetsContainer').innerHTML = '';
-                manualBets = [];
-                bets.forEach(bet => addManualBetRow(bet.type, bet.numbers.join(', ')));
+                $('saveDraw').style.display = 'inline-flex';
 
                 showStatus('ocrStatus', 'success', `Extracted ${bets.length} bet(s) successfully!`);
             } catch(err) {
-                showStatus('ocrStatus', 'error', `OCR failed: ${err.message}`);
+                showStatus('ocrStatus', 'error', `Extraction failed: ${err.message}`);
             }
-        };
-
-        /* ═══════════════════════════
-           ADMIN — Fetch Predictions
-        ═══════════════════════════ */
-        $('fetchPredictions').onclick = async () => {
-            const url = await getSetting('predictor_url');
-            if (!url) { showStatus('predStatus', 'error', 'Set Predictor API URL in Settings first.'); return; }
-            showStatus('predStatus', 'loading', 'Fetching predictions...');
-            try {
-                const res = await fetch(url);
-                const data = await res.json();
-                const preds = data.predictions || data;
-                $('predInput').value = preds.map(p => p.join(', ')).join('\n');
-                showStatus('predStatus', 'success', `Loaded ${preds.length} prediction(s)`);
-            } catch(err) {
-                showStatus('predStatus', 'error', `Fetch failed: ${err.message}`);
-            }
-        };
-
-        /* ═══════════════════════════
-           ADMIN — Fetch Results
-        ═══════════════════════════ */
-        $('fetchResults').onclick = () => {
-            showStatus('resultStatus', 'error', 'Singapore Pools blocks cross-origin requests. Please enter results manually or set up a backend proxy.');
         };
 
         /* ═══════════════════════════
            ADMIN — Save / Delete Draw
         ═══════════════════════════ */
-        let editingDrawId = null;
 
         $('saveDraw').onclick = async () => {
-            const date = $('drawDate').value;
-            if (!date) { showStatus('saveStatus', 'error', 'Please set a draw date.'); return; }
+            if (!extractedData && !editingDrawId) {
+                showStatus('saveStatus', 'error', 'Upload and extract a bet slip first.');
+                return;
+            }
 
             showStatus('saveStatus', 'loading', 'Saving draw...');
 
-            const drawNumber = $('drawNumber').value.trim();
-            const predLines = $('predInput').value.trim().split('\n').filter(l => l.trim());
-            const predictions = predLines.map(line => parseNumbers(line)).filter(p => p.length >= 6);
-            const bets = collectManualBets();
-            const winNums = parseNumbers($('resultNumbers').value);
-            const addNum = parseInt($('resultAdditional').value.trim()) || null;
-            const results = winNums.length === 6 ? { winning: winNums, additional: addNum } : { winning: [], additional: null };
+            const bets = extractedData ? (extractedData.bets || []) : [];
+            const drawDate = extractedData ? extractedData.draw_date : null;
+            const drawNumber = extractedData ? extractedData.draw_number : null;
+
+            if (!drawDate) {
+                showStatus('saveStatus', 'error', 'Could not determine draw date from the image. Please try again.');
+                return;
+            }
 
             const draw = {
                 id: editingDrawId || undefined,
-                draw_date: date,
-                draw_number: drawNumber,
-                predictions,
+                draw_date: drawDate,
+                draw_number: drawNumber || '',
+                predictions: [],
                 bets,
-                results
+                results: { winning: [], additional: null }
             };
 
             const { data, error } = await upsertDraw(draw);
@@ -1007,34 +830,36 @@ Return ONLY valid JSON in this exact format, no other text:
 
         function resetForm() {
             editingDrawId = null;
-            $('drawDate').value = '';
-            $('drawNumber').value = '';
-            $('predInput').value = '';
-            $('resultNumbers').value = '';
-            $('resultAdditional').value = '';
-            $('manualBetsContainer').innerHTML = '';
-            manualBets = [];
+            uploadedFile = null;
+            extractedData = null;
             $('uploadPreview').style.display = 'none';
             $('extractBetsBtn').style.display = 'none';
             $('extractedBets').style.display = 'none';
+            $('saveDraw').style.display = 'none';
             $('deleteDraw').style.display = 'none';
-            uploadedImageBase64 = null;
             hideStatus('saveStatus'); hideStatus('ocrStatus');
-            hideStatus('predStatus'); hideStatus('resultStatus');
         }
 
         function loadDrawIntoForm(draw) {
             editingDrawId = draw.id;
-            $('drawDate').value = draw.draw_date;
-            $('drawNumber').value = draw.draw_number || '';
-            $('predInput').value = (draw.predictions || []).map(p => p.join(', ')).join('\n');
-            $('resultNumbers').value = draw.results && draw.results.winning ? draw.results.winning.join(', ') : '';
-            $('resultAdditional').value = draw.results && draw.results.additional ? draw.results.additional : '';
+            extractedData = { draw_date: draw.draw_date, draw_number: draw.draw_number, bets: draw.bets || [] };
 
-            $('manualBetsContainer').innerHTML = '';
-            manualBets = [];
-            (draw.bets || []).forEach(bet => addManualBetRow(bet.type, bet.numbers.join(', ')));
+            // Show existing bets
+            let infoHtml = `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem;">Draw Date: <strong style="color:var(--text);">${draw.draw_date}</strong></p>`;
+            if (draw.draw_number) infoHtml += `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.5rem;">Draw #: <strong style="color:var(--text);">${draw.draw_number}</strong></p>`;
+            $('extractedInfo').innerHTML = infoHtml;
 
+            const bets = draw.bets || [];
+            $('extractedList').innerHTML = bets.map(bet =>
+                `<div class="extracted-bet-item">
+                    <span class="bet-type ${getBetTypeClass(bet.type)}">${bet.type}</span>
+                    <div class="num-row" style="margin:0;">
+                        ${bet.numbers.map(n => `<span class="ball">${String(n).padStart(2,'0')}</span>`).join('')}
+                    </div>
+                </div>`
+            ).join('');
+            $('extractedBets').style.display = bets.length ? 'block' : 'none';
+            $('saveDraw').style.display = 'inline-flex';
             $('deleteDraw').style.display = 'inline-flex';
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }

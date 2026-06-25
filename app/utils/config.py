@@ -12,6 +12,7 @@ from pydantic_settings import BaseSettings
 # value.  On Windows, GUI tools sometimes write empty strings that shadow file
 # values.
 _REQUIRED_KEYS = {
+    "ANTHROPIC_API_KEY",
     "SUPABASE_URL",
     "SUPABASE_KEY",
 }
@@ -28,6 +29,9 @@ class Settings(BaseSettings):
     # ── App behaviour ─────────────────────────────────────────────────────────
     environment:    str
     tz:             str
+
+    # ── Anthropic ─────────────────────────────────────────────────────────────
+    anthropic_api_key: str
 
     # ── Supabase ──────────────────────────────────────────────────────────────
     supabase_url:   str

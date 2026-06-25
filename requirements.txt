@@ -6,4 +6,6 @@ pydantic==2.11.*
 supabase==2.*
 python-dotenv==1.*
 pydantic-settings==2.*
+anthropic==0.52.*
+python-multipart==0.0.*
 apscheduler==3.10.*

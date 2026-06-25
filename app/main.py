@@ -14,9 +14,11 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import anthropic
+import base64
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -350,3 +352,59 @@ async def postmortem(req: PostMortemRequest):
         numbers_we_missed=result["numbers_we_missed"],
         root_cause=result["root_cause"],
     )
+
+
+@app.post("/extract-bets")
+async def extract_bets(image: UploadFile = File(...)):
+    """Extract bet numbers from an uploaded bet slip image using Claude Vision."""
+    image_bytes = await image.read()
+    b64 = base64.b64encode(image_bytes).decode()
+    media_type = image.content_type or "image/jpeg"
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+    prompt = (
+        "Extract all Singapore Toto bet information from this bet slip image.\n\n"
+        "For each bet, identify:\n"
+        "1. The bet type: \"Ordinary\" (6 numbers), \"System 7\" (7 numbers), "
+        "\"System 8\" (8 numbers), etc.\n"
+        "2. The numbers selected.\n\n"
+        "Also extract the draw date and draw number if visible.\n\n"
+        "Return ONLY valid JSON in this exact format, no other text:\n"
+        "{\n"
+        '  "draw_date": "2026-06-26",\n'
+        '  "draw_number": "3850",\n'
+        '  "bets": [\n'
+        '    {"type": "Ordinary", "numbers": [1, 12, 23, 34, 40, 49]},\n'
+        '    {"type": "System 7", "numbers": [3, 10, 15, 22, 33, 41, 48]}\n'
+        "  ]\n"
+        "}\n"
+        "If draw date or draw number is not visible, set them to null."
+    )
+
+    try:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+
+        import json, re
+        text = response.content[0].text
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if not json_match:
+            raise HTTPException(422, "Could not parse response from Claude")
+
+        result = json.loads(json_match.group())
+        return result
+
+    except anthropic.APIError as e:
+        raise HTTPException(502, f"Claude API error: {e.message}")
+    except json.JSONDecodeError:
+        raise HTTPException(422, "Could not parse JSON from Claude response")
