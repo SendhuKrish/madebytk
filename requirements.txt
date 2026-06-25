@@ -1,0 +1,9 @@
+fastapi==0.115.*
+uvicorn[standard]==0.34.*
+httpx==0.28.*
+beautifulsoup4==4.12.*
+pydantic==2.11.*
+supabase==2.*
+python-dotenv==1.*
+pydantic-settings==2.*
+apscheduler==3.10.*
