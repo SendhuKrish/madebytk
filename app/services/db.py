@@ -69,12 +69,11 @@ def get_draw_by_date(draw_date: str) -> dict | None:
 
 def sign_in_user(email: str, password: str) -> dict:
     """Sign in a user via Supabase Auth. Returns session data or raises."""
-    from gotrue.errors import AuthApiError
     try:
         resp = get_client().auth.sign_in_with_password({"email": email, "password": password})
         return {
             "access_token": resp.session.access_token,
             "user": {"id": str(resp.user.id), "email": resp.user.email},
         }
-    except AuthApiError as e:
+    except Exception as e:
         raise ValueError(str(e))
