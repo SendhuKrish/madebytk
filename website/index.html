@@ -401,7 +401,11 @@
 
         <!-- Draw History (Admin) -->
         <div class="admin-section">
-            <h3>📋 All Draws</h3>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+                <h3 style="margin:0;">📋 All Draws</h3>
+                <button class="btn-outline-sm" id="fetchAllResults">🌐 Fetch Missing Results</button>
+            </div>
+            <div class="status-msg" id="fetchResultsStatus"></div>
             <div id="adminDrawList"></div>
         </div>
     </div>
@@ -863,6 +867,22 @@
             $('deleteDraw').style.display = 'inline-flex';
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
+
+        /* ═══════════════════════════
+           ADMIN — Fetch Missing Results
+        ═══════════════════════════ */
+        $('fetchAllResults').onclick = async () => {
+            showStatus('fetchResultsStatus', 'loading', 'Fetching results from Singapore Pools...');
+            try {
+                const res = await fetch('/api/fetch-results', { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Failed');
+                showStatus('fetchResultsStatus', 'success', data.message);
+                if (data.updated > 0) await renderAdminDrawList();
+            } catch(err) {
+                showStatus('fetchResultsStatus', 'error', `Failed: ${err.message}`);
+            }
+        };
 
         /* ═══════════════════════════
            ADMIN — Draw List

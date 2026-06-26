@@ -40,6 +40,15 @@ def get_draw_by_number(draw_number: str) -> dict | None:
     return resp.data[0] if resp.data else None
 
 
+def fetch_draws_without_results() -> list[dict]:
+    """Fetch draws that have no winning numbers."""
+    all_draws = fetch_all_draws()
+    return [
+        d for d in all_draws
+        if not d.get("results") or not d["results"].get("winning") or len(d["results"]["winning"]) == 0
+    ]
+
+
 def get_draw_by_date(draw_date: str) -> dict | None:
     """Get a draw by draw_date (YYYY-MM-DD)."""
     resp = (

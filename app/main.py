@@ -39,7 +39,7 @@ from app.models import (
     RuleResult,
 )
 from app.services.scraper import fetch_latest_draw
-from app.services.db import fetch_all_draws
+from app.services.db import fetch_all_draws, fetch_draws_without_results, upsert_draw, get_draw_by_date
 
 logging.basicConfig(
     level=logging.INFO,
@@ -408,3 +408,47 @@ async def extract_bets(image: UploadFile = File(...)):
         raise HTTPException(502, f"Claude API error: {e.message}")
     except json.JSONDecodeError:
         raise HTTPException(422, "Could not parse JSON from Claude response")
+
+
+@app.post("/fetch-results")
+async def fetch_missing_results():
+    """Fetch results for all draws that don't have winning numbers yet."""
+    from app.jobs.results import (
+        fetch_from_singapore_pools,
+        fetch_from_lottolyzer,
+        fetch_from_lottery_extreme,
+    )
+
+    draws = fetch_draws_without_results()
+    if not draws:
+        return {"message": "All draws already have results", "updated": 0}
+
+    # Fetch latest results from scrapers
+    result = await fetch_from_singapore_pools()
+    if not result:
+        result = await fetch_from_lottolyzer()
+    if not result:
+        result = await fetch_from_lottery_extreme()
+    if not result:
+        raise HTTPException(503, "Could not fetch results from any source")
+
+    # Match by draw_date or draw_number
+    updated = 0
+    for draw in draws:
+        match = False
+        if result.get("draw_date") and draw["draw_date"] == result["draw_date"]:
+            match = True
+        if result.get("draw_number") and draw.get("draw_number") == result["draw_number"]:
+            match = True
+
+        if match:
+            draw["results"] = {
+                "winning": result["winning"],
+                "additional": result["additional"],
+            }
+            if result.get("draw_number") and not draw.get("draw_number"):
+                draw["draw_number"] = result["draw_number"]
+            upsert_draw(draw)
+            updated += 1
+
+    return {"message": f"Updated {updated} draw(s) with results", "updated": updated}
