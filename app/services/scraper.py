@@ -123,3 +123,84 @@ async def _try_lottery_extreme() -> dict | None:
         logger.exception("LotteryExtreme fetch failed")
 
     return None
+
+
+async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
+    """Fetch multiple draws from lottolyzer.com history page.
+
+    Returns list of dicts with keys: draw_number, date, winning, additional.
+    """
+    results = []
+    url = f"https://en.lottolyzer.com/history/singapore/toto/page/1/per-page/{pages * 50}/number-view"
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.get(url, headers=HEADERS)
+            resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        text = soup.get_text()
+
+        # Parse draw blocks: "Draw NNNN\nDD Mon YYYY\n" followed by ball images
+        # Find all ball images grouped by draw
+        draw_blocks = re.findall(
+            r"Draw\s+(\d{4})\s*\n\s*(\d{1,2}\s+\w+\s+\d{4})",
+            text,
+        )
+
+        # Find all ball image sequences
+        all_imgs = soup.select("img[src*='ball']")
+        ball_groups = []
+        current_group = []
+
+        for img in all_imgs:
+            title = img.get("title") or img.get("alt") or ""
+            src = img.get("src", "")
+
+            # Skip the plus sign
+            if "plus" in src:
+                continue
+
+            digits = re.findall(r"\d+", title or src.split("/")[-1])
+            if digits:
+                val = int(digits[0])
+                if 1 <= val <= 49:
+                    current_group.append(val)
+
+            # Each draw has 7 balls (6 winning + 1 additional)
+            if len(current_group) == 7:
+                ball_groups.append(current_group)
+                current_group = []
+
+        if current_group and len(current_group) == 7:
+            ball_groups.append(current_group)
+
+        # Match draw info with ball groups
+        for i, (draw_num, date_str) in enumerate(draw_blocks):
+            if i >= len(ball_groups):
+                break
+
+            balls = ball_groups[i]
+            winning = sorted(balls[:6])
+            additional = balls[6]
+
+            # Parse date
+            from datetime import datetime
+            try:
+                draw_date = datetime.strptime(date_str.strip(), "%d %b %Y").strftime("%Y-%m-%d")
+            except ValueError:
+                draw_date = None
+
+            results.append({
+                "draw_number": draw_num,
+                "draw_date": draw_date,
+                "winning": winning,
+                "additional": additional,
+            })
+
+        logger.info(f"Lottolyzer history: fetched {len(results)} draws")
+
+    except Exception:
+        logger.exception("Lottolyzer history fetch failed")
+
+    return results

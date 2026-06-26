@@ -413,35 +413,25 @@ async def extract_bets(image: UploadFile = File(...)):
 @app.post("/fetch-results")
 async def fetch_missing_results():
     """Fetch results for all draws that don't have winning numbers yet."""
-    from app.jobs.results import (
-        fetch_from_singapore_pools,
-        fetch_from_lottolyzer,
-        fetch_from_lottery_extreme,
-    )
+    from app.services.scraper import fetch_lottolyzer_history
 
     draws = fetch_draws_without_results()
     if not draws:
         return {"message": "All draws already have results", "updated": 0}
 
-    # Fetch latest results from scrapers
-    result = await fetch_from_singapore_pools()
-    if not result:
-        result = await fetch_from_lottolyzer()
-    if not result:
-        result = await fetch_from_lottery_extreme()
-    if not result:
-        raise HTTPException(503, "Could not fetch results from any source")
+    # Fetch historical results from lottolyzer
+    history = await fetch_lottolyzer_history()
+    if not history:
+        raise HTTPException(503, "Could not fetch historical results")
 
-    # Match by draw_date or draw_number
+    # Build lookup by date and draw number
+    by_date = {r["draw_date"]: r for r in history if r.get("draw_date")}
+    by_number = {r["draw_number"]: r for r in history if r.get("draw_number")}
+
     updated = 0
     for draw in draws:
-        match = False
-        if result.get("draw_date") and draw["draw_date"] == result["draw_date"]:
-            match = True
-        if result.get("draw_number") and draw.get("draw_number") == result["draw_number"]:
-            match = True
-
-        if match:
+        result = by_date.get(draw["draw_date"]) or by_number.get(draw.get("draw_number"))
+        if result:
             draw["results"] = {
                 "winning": result["winning"],
                 "additional": result["additional"],
