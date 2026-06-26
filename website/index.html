@@ -3,337 +3,258 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MadeByTK — Singapore Toto Tracker</title>
-    <meta name="description" content="Track Singapore Toto predictions, bets placed, and draw results. See which numbers hit with smart highlighting and full draw history.">
-    <meta name="keywords" content="Singapore Toto, Toto predictions, Toto results, lottery tracker, Toto predictor, Singapore Pools">
+    <title>Toto Tracker — MadeByTK</title>
+    <meta name="description" content="Track Singapore Toto predictions, bets placed, and draw results with smart match highlighting.">
     <link rel="canonical" href="https://madebytk.com/">
-
-    <meta property="og:title" content="MadeByTK — Singapore Toto Tracker">
-    <meta property="og:description" content="Track Toto predictions, bets, and results with smart match highlighting.">
-    <meta property="og:type" content="website">
-
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-    <!-- Supabase JS -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-
     <style>
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
-            --bg: #06060b;
-            --bg-card: #0c0c16;
-            --bg-elevated: #111120;
-            --bg-input: #0e0e1a;
-            --border: #1a1a30;
-            --border-hover: #2a2a50;
-            --text: #e8e8f4;
-            --text-dim: #7878a0;
-            --text-muted: #4a4a6a;
-            --accent: #6366f1;
-            --accent-light: #818cf8;
+            --bg: #f5f5f0;
+            --bg-card: #ffffff;
+            --border: #e5e5dd;
+            --border-light: #eeeeea;
+            --text: #1a1a1a;
+            --text-dim: #666666;
+            --text-muted: #999999;
             --green: #22c55e;
-            --green-bg: rgba(34,197,94,.1);
-            --green-border: rgba(34,197,94,.3);
+            --green-bg: #dcfce7;
+            --green-dark: #16a34a;
             --amber: #f59e0b;
+            --amber-bg: #fef3c7;
             --red: #ef4444;
-            --cyan: #06b6d4;
-            --gold: #fbbf24;
+            --accent: #4f46e5;
         }
         html { scroll-behavior: smooth; }
         body {
             font-family: 'Inter', -apple-system, sans-serif;
             background: var(--bg); color: var(--text);
-            line-height: 1.6; overflow-x: hidden;
+            line-height: 1.6;
         }
 
-        .bg-grad {
-            position: fixed; inset: 0; z-index: 0; pointer-events: none;
-            background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(99,102,241,.08), transparent);
-        }
-
-        /* ── Nav ── */
-        nav {
-            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-            padding: .8rem 1.5rem;
-            background: rgba(6,6,11,.88); backdrop-filter: blur(20px);
+        /* ── Header ── */
+        .header {
+            background: var(--bg-card);
             border-bottom: 1px solid var(--border);
+            padding: .8rem 1.5rem;
             display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
         }
-        .nav-logo {
-            font-family: 'JetBrains Mono', monospace;
-            font-weight: 700; font-size: 1rem;
+        .header-left { display: flex; align-items: center; gap: 1rem; }
+        .header h1 {
+            font-size: 1.2rem; font-weight: 800;
         }
-        .nav-logo .dim { color: var(--text-dim); }
-        .nav-logo .acc { color: var(--accent-light); }
-        .nav-right { display: flex; align-items: center; gap: 1rem; }
-        .nav-link {
-            color: var(--text-dim); text-decoration: none; font-size: .85rem;
-            font-weight: 500; transition: color .2s;
-        }
-        .nav-link:hover { color: var(--text); }
+        .legend { display: flex; align-items: center; gap: 1rem; font-size: .75rem; color: var(--text-dim); }
+        .legend-item { display: flex; align-items: center; gap: .3rem; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .legend-dot.match { background: var(--green); }
+        .legend-dot.bonus { background: var(--amber); }
+        .legend-dot.near { border: 1.5px dashed var(--green); background: transparent; }
+        .header-right { display: flex; align-items: center; gap: .75rem; }
         .btn-sm {
-            padding: .4rem .9rem; border-radius: 8px; font-size: .8rem;
-            font-weight: 600; cursor: pointer; transition: all .2s; border: none;
+            padding: .35rem .8rem; border-radius: 6px; font-size: .78rem;
+            font-weight: 600; cursor: pointer; border: none; transition: all .15s;
         }
-        .btn-accent { background: var(--accent); color: #fff; }
-        .btn-accent:hover { background: var(--accent-light); }
-        .btn-ghost { background: rgba(255,255,255,.05); color: var(--text-dim); border: 1px solid var(--border); }
+        .btn-admin { background: var(--accent); color: #fff; }
+        .btn-admin:hover { opacity: .9; }
+        .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
         .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+        .btn-logout { background: var(--red); color: #fff; }
 
-        /* ── Hero ── */
-        .hero {
-            position: relative; z-index: 1;
-            text-align: center; padding: 6rem 1.5rem 3rem;
-        }
-        .hero h1 {
-            font-size: clamp(1.6rem, 4vw, 2.5rem);
-            font-weight: 900; letter-spacing: -.02em; margin-bottom: .5rem;
-        }
-        .hero h1 .gradient {
-            background: linear-gradient(135deg, var(--gold), var(--amber));
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .hero p { color: var(--text-dim); font-size: 1rem; }
-
-        .container {
-            position: relative; z-index: 1;
-            max-width: 1200px; margin: 0 auto; padding: 0 1.5rem 4rem;
-        }
+        /* ── Container ── */
+        .container { max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem; }
 
         /* ── Draw Card ── */
         .draw-card {
-            background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: 16px; margin-bottom: 1.5rem; overflow: hidden;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 1rem;
+            overflow: hidden;
         }
         .draw-header {
             display: flex; align-items: center; justify-content: space-between;
-            padding: 1rem 1.5rem;
-            background: rgba(255,255,255,.015);
-            border-bottom: 1px solid var(--border);
+            padding: .8rem 1.2rem;
             cursor: pointer; user-select: none;
+            transition: background .15s;
         }
-        .draw-header:hover { background: rgba(255,255,255,.03); }
-        .draw-title { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+        .draw-header:hover { background: #fafaf7; }
+        .draw-left { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; }
         .draw-date {
             font-family: 'JetBrains Mono', monospace;
-            font-weight: 700; font-size: .95rem;
+            font-weight: 700; font-size: .88rem;
+            min-width: 140px;
         }
         .draw-num {
-            font-size: .75rem; color: var(--text-muted);
-            padding: .15rem .5rem; border-radius: 4px;
-            background: rgba(255,255,255,.04);
+            font-size: .72rem; color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
         }
-        .draw-stats { display: flex; gap: 1rem; align-items: center; }
-        .match-badge {
-            font-size: .78rem; font-weight: 700; padding: .2rem .7rem;
-            border-radius: 6px;
-        }
-        .match-badge.has-match { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
-        .match-badge.no-match { background: rgba(255,255,255,.04); color: var(--text-muted); }
-        .chevron { color: var(--text-muted); transition: transform .2s; font-size: 1.2rem; }
-        .draw-card.open .chevron { transform: rotate(180deg); }
-        .draw-body { display: none; padding: 1.5rem; }
-        .draw-card.open .draw-body { display: block; }
-
-        .draw-columns {
-            display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem;
-        }
-        .draw-col h4 {
-            font-size: .75rem; text-transform: uppercase; letter-spacing: .1em;
-            color: var(--text-muted); margin-bottom: .75rem;
-            padding-bottom: .5rem; border-bottom: 1px solid var(--border);
-        }
-        .draw-col h4 .count { color: var(--text-dim); font-weight: 400; }
-
-        .num-row { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .6rem; align-items: center; }
+        .winning-row { display: flex; align-items: center; gap: .3rem; }
         .ball {
-            width: 36px; height: 36px; border-radius: 50%;
+            width: 32px; height: 32px; border-radius: 50%;
             display: inline-flex; align-items: center; justify-content: center;
             font-family: 'JetBrains Mono', monospace;
-            font-weight: 700; font-size: .82rem;
-            background: var(--bg-elevated); border: 1.5px solid var(--border);
-            color: var(--text); transition: all .2s;
+            font-weight: 600; font-size: .78rem;
+            background: #f0f0eb; border: 1.5px solid var(--border);
+            color: var(--text);
         }
-        .ball.match {
-            background: var(--green-bg) !important; border-color: var(--green) !important;
-            color: var(--green) !important; box-shadow: 0 0 12px rgba(34,197,94,.2);
+        .ball.win { background: var(--green); border-color: var(--green-dark); color: #fff; }
+        .ball.bonus-ball { background: var(--amber); border-color: #d97706; color: #fff; }
+        .ball.match { background: var(--green); border-color: var(--green-dark); color: #fff; }
+        .ball.bonus-match { background: var(--amber); border-color: #d97706; color: #fff; }
+        .ball.near { border: 2px dashed var(--green); background: transparent; color: var(--text); }
+        .plus-sign { color: var(--text-muted); font-size: .8rem; font-weight: 600; }
+        .draw-right { display: flex; align-items: center; gap: .8rem; }
+        .draw-stats-text {
+            font-size: .75rem; color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
         }
-        .ball.additional { border-color: var(--amber); color: var(--amber); }
-        .ball.additional.match {
-            background: rgba(245,158,11,.12) !important; border-color: var(--amber) !important;
-            color: var(--amber) !important; box-shadow: 0 0 12px rgba(245,158,11,.2);
+        .match-count {
+            width: 28px; height: 28px; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: .8rem; color: #fff;
         }
-        .ball.winning {
-            background: linear-gradient(135deg, rgba(251,191,36,.15), rgba(245,158,11,.08));
-            border-color: var(--gold); color: var(--gold);
-        }
-        .plus-sign { color: var(--text-muted); font-size: .8rem; margin: 0 .2rem; }
+        .match-count.green { background: var(--green); }
+        .match-count.amber { background: var(--amber); }
+        .match-count.gray { background: #ccc; }
+        .chevron { color: var(--text-muted); transition: transform .2s; font-size: .9rem; }
+        .draw-card.open .chevron { transform: rotate(180deg); }
+        .draw-body { display: none; padding: 0 1.2rem 1.2rem; }
+        .draw-card.open .draw-body { display: block; }
 
-        .bet-type {
-            display: inline-block; font-size: .65rem; font-weight: 700;
-            text-transform: uppercase; letter-spacing: .06em;
-            padding: .15rem .45rem; border-radius: 4px; margin-bottom: .3rem;
+        /* ── Two columns: predictions & bets ── */
+        .draw-columns {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+            border-top: 1px solid var(--border-light);
+            padding-top: 1rem;
         }
-        .bet-type.ordinary { background: rgba(99,102,241,.12); color: var(--accent-light); }
-        .bet-type.system7 { background: rgba(6,182,212,.12); color: var(--cyan); }
-        .bet-type.system8 { background: rgba(236,72,153,.12); color: #ec4899; }
-        .bet-type.system9 { background: rgba(245,158,11,.12); color: var(--amber); }
-        .bet-type.system10 { background: rgba(139,92,246,.12); color: #8b5cf6; }
-        .bet-type.system11 { background: rgba(34,197,94,.12); color: var(--green); }
-        .bet-type.system12 { background: rgba(239,68,68,.12); color: var(--red); }
-        .bet-group { margin-bottom: 1rem; }
-        .bet-group:last-child { margin-bottom: 0; }
-
-        .no-data { color: var(--text-muted); font-size: .85rem; font-style: italic; padding: 1rem 0; }
+        .draw-col h4 {
+            font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+            color: var(--text-muted); font-weight: 700; margin-bottom: .6rem;
+        }
+        .line-row {
+            display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem;
+        }
+        .line-num {
+            font-size: .72rem; font-weight: 700; color: var(--text-muted);
+            min-width: 16px; text-align: right;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .line-balls { display: flex; gap: .25rem; align-items: center; }
+        .line-match {
+            font-size: .72rem; color: var(--text-muted); margin-left: auto;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .bet-type-tag {
+            font-size: .6rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .04em; padding: .1rem .35rem; border-radius: 3px;
+            color: var(--green-dark); background: var(--green-bg);
+        }
+        .no-data { color: var(--text-muted); font-size: .8rem; font-style: italic; padding: .5rem 0; }
         .empty-state { text-align: center; padding: 4rem 2rem; color: var(--text-muted); }
-        .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; }
-        .empty-state h3 { color: var(--text-dim); font-size: 1.1rem; margin-bottom: .5rem; }
 
-        /* Loading spinner */
-        .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: .5rem; }
+        /* ── Loading ── */
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: .5rem; }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .loading-bar { text-align: center; padding: 2rem; color: var(--text-dim); }
+        .loading-bar { text-align: center; padding: 2rem; color: var(--text-dim); font-size: .9rem; }
 
-        /* ══════════════════════════════
-           ADMIN PANEL
-        ══════════════════════════════ */
-        .admin-panel { display: none; position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 6rem 1.5rem 4rem; }
-        .admin-panel.active { display: block; }
-        .admin-section {
-            background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: 14px; padding: 1.5rem; margin-bottom: 1.5rem;
-        }
-        .admin-section h3 { font-size: 1rem; font-weight: 700; margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem; }
-
-        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
-        .form-group { margin-bottom: 1rem; }
-        .form-group label { display: block; font-size: .8rem; font-weight: 600; color: var(--text-dim); margin-bottom: .35rem; }
-        .form-group input, .form-group select, .form-group textarea {
-            width: 100%; padding: .65rem .9rem; border-radius: 8px;
-            background: var(--bg-input); border: 1px solid var(--border);
-            color: var(--text); font-size: .88rem; font-family: inherit;
-            outline: none; transition: border-color .2s;
-        }
-        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--accent); }
-        .form-group textarea { resize: vertical; min-height: 80px; }
-        .form-group select { cursor: pointer; }
-        .form-group select option { background: var(--bg-card); }
-
-        .upload-zone {
-            border: 2px dashed var(--border); border-radius: 12px;
-            padding: 2rem; text-align: center; cursor: pointer;
-            transition: all .2s; position: relative;
-        }
-        .upload-zone:hover { border-color: var(--accent); background: rgba(99,102,241,.03); }
-        .upload-zone.dragover { border-color: var(--accent); background: rgba(99,102,241,.06); }
-        .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-        .upload-zone .icon { font-size: 2rem; margin-bottom: .5rem; }
-        .upload-zone p { color: var(--text-dim); font-size: .88rem; }
-        .upload-zone .hint { font-size: .75rem; color: var(--text-muted); margin-top: .3rem; }
-
-        .upload-preview { display: none; margin-top: 1rem; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
-        .upload-preview img { max-width: 100%; max-height: 300px; display: block; margin: 0 auto; }
-
-        .extracted-bets {
-            display: none; margin-top: 1rem;
-            background: var(--bg-elevated); border: 1px solid var(--border);
-            border-radius: 10px; padding: 1rem;
-        }
-        .extracted-bets h4 { font-size: .85rem; font-weight: 700; margin-bottom: .75rem; color: var(--green); }
-        .extracted-bet-item {
-            display: flex; align-items: center; gap: .75rem;
-            padding: .5rem 0; border-bottom: 1px solid rgba(255,255,255,.03);
-        }
-        .extracted-bet-item:last-child { border-bottom: none; }
-
-        .btn {
-            padding: .6rem 1.2rem; border-radius: 8px; font-weight: 700;
-            font-size: .88rem; cursor: pointer; transition: all .2s; border: none;
-        }
-        .btn-primary { background: var(--accent); color: #fff; }
-        .btn-primary:hover { background: var(--accent-light); }
-        .btn-success { background: var(--green); color: #fff; }
-        .btn-success:hover { background: #16a34a; }
-        .btn-danger { background: var(--red); color: #fff; }
-        .btn-danger:hover { background: #dc2626; }
-        .btn-outline-sm {
-            padding: .4rem .8rem; border-radius: 6px; font-size: .78rem;
-            font-weight: 600; cursor: pointer; background: none;
-            border: 1px solid var(--border); color: var(--text-dim); transition: all .2s;
-        }
-        .btn-outline-sm:hover { border-color: var(--accent); color: var(--accent); }
-        .btn-row { display: flex; gap: .75rem; margin-top: 1rem; flex-wrap: wrap; }
-
-        .status-msg { font-size: .85rem; padding: .5rem .8rem; border-radius: 8px; margin-top: .75rem; display: none; }
-        .status-msg.success { display: block; background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
-        .status-msg.error { display: block; background: rgba(239,68,68,.1); color: var(--red); border: 1px solid rgba(239,68,68,.3); }
-        .status-msg.loading { display: block; background: rgba(99,102,241,.1); color: var(--accent-light); border: 1px solid rgba(99,102,241,.3); }
-
-        .api-key-row { display: flex; gap: .75rem; align-items: end; margin-bottom: 1rem; }
-        .api-key-row .form-group { flex: 1; margin-bottom: 0; }
-
-        /* ── Login overlay ── */
+        /* ── Login ── */
         .login-overlay {
             display: none; position: fixed; inset: 0; z-index: 200;
-            background: rgba(6,6,11,.92); backdrop-filter: blur(10px);
+            background: rgba(0,0,0,.4); backdrop-filter: blur(4px);
             align-items: center; justify-content: center;
         }
         .login-overlay.show { display: flex; }
         .login-box {
-            background: var(--bg-card); border: 1px solid var(--border);
-            border-radius: 16px; padding: 2rem; width: 360px; max-width: 90vw;
-            text-align: center;
+            background: var(--bg-card); border-radius: 12px; padding: 2rem;
+            width: 90%; max-width: 380px; position: relative;
         }
-        .login-box h2 { font-size: 1.2rem; font-weight: 800; margin-bottom: .5rem; }
-        .login-box .sub { color: var(--text-dim); font-size: .85rem; margin-bottom: 1.5rem; }
+        .login-box h2 { font-size: 1.1rem; margin-bottom: .3rem; }
+        .login-box .sub { font-size: .82rem; color: var(--text-dim); margin-bottom: 1.2rem; }
         .login-field {
-            width: 100%; padding: .7rem .9rem; border-radius: 8px;
-            background: var(--bg-input); border: 1px solid var(--border);
-            color: var(--text); font-size: .9rem; font-family: inherit;
-            outline: none; margin-bottom: .6rem;
+            width: 100%; padding: .6rem .8rem; margin-bottom: .6rem;
+            border: 1px solid var(--border); border-radius: 8px;
+            font-size: .88rem; background: var(--bg);
         }
-        .login-field:focus { border-color: var(--accent); }
         .login-submit {
-            width: 100%; padding: .7rem; border-radius: 8px;
+            width: 100%; padding: .6rem; border-radius: 8px;
             background: var(--accent); color: #fff; font-weight: 700;
             font-size: .9rem; border: none; cursor: pointer;
         }
         .login-error { color: var(--red); font-size: .8rem; margin-top: .5rem; display: none; }
         .login-close {
-            position: absolute; top: 1rem; right: 1rem;
+            position: absolute; top: .8rem; right: .8rem;
             background: none; border: none; color: var(--text-dim);
             font-size: 1.3rem; cursor: pointer;
         }
 
+        /* ── Admin Panel ── */
+        .admin-panel { display: none; max-width: 900px; margin: 0 auto; padding: 1.5rem 1rem; }
+        .admin-panel.active { display: block; }
+        .admin-section {
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1.2rem; margin-bottom: 1rem;
+        }
+        .admin-section h3 { font-size: .95rem; font-weight: 700; margin-bottom: .8rem; }
+        .upload-zone {
+            border: 2px dashed var(--border); border-radius: 10px;
+            padding: 2rem; text-align: center; cursor: pointer; transition: all .2s;
+            position: relative;
+        }
+        .upload-zone:hover, .upload-zone.dragover { border-color: var(--accent); background: rgba(79,70,229,.03); }
+        .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+        .upload-zone .icon { font-size: 2rem; margin-bottom: .5rem; }
+        .upload-zone p { color: var(--text-dim); font-size: .85rem; }
+        .upload-zone .hint { font-size: .75rem; color: var(--text-muted); margin-top: .3rem; }
+        .upload-preview { display: none; margin-top: 1rem; text-align: center; }
+        .upload-preview img { max-width: 100%; max-height: 300px; border-radius: 8px; border: 1px solid var(--border); }
+        .extracted-bets { display: none; margin-top: 1rem; padding: 1rem; background: var(--green-bg); border-radius: 8px; }
+        .extracted-bets h4 { color: var(--green-dark); font-size: .85rem; margin-bottom: .5rem; }
+        .extracted-bet-item { display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
+        .btn { padding: .5rem 1rem; border-radius: 8px; font-weight: 600; font-size: .85rem; cursor: pointer; border: none; }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-success { background: var(--green); color: #fff; }
+        .btn-danger { background: var(--red); color: #fff; }
+        .btn-outline-sm { padding: .35rem .8rem; border-radius: 6px; font-size: .78rem; font-weight: 600; cursor: pointer; background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+        .btn-outline-sm:hover { border-color: var(--accent); color: var(--accent); }
+        .btn-row { display: flex; gap: .5rem; margin-top: .8rem; flex-wrap: wrap; }
+        .status-msg { font-size: .82rem; padding: .5rem .8rem; border-radius: 6px; margin-top: .5rem; display: none; }
+        .status-msg.success { display: block; background: var(--green-bg); color: var(--green-dark); }
+        .status-msg.error { display: block; background: #fee2e2; color: var(--red); }
+        .status-msg.loading { display: block; background: #eff6ff; color: #2563eb; }
+
         footer {
-            position: relative; z-index: 1;
-            text-align: center; padding: 2rem 1.5rem;
+            text-align: center; padding: 2rem 1rem;
             border-top: 1px solid var(--border);
         }
-        footer p { color: var(--text-muted); font-size: .8rem; }
-        footer a { color: var(--accent-light); text-decoration: none; }
+        footer p { color: var(--text-muted); font-size: .78rem; }
+        footer a { color: var(--accent); text-decoration: none; }
 
-        @media (max-width: 768px) {
+        @media (max-width: 640px) {
             .draw-columns { grid-template-columns: 1fr; }
-            .draw-col { padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
-            .draw-col:last-child { border-bottom: none; padding-bottom: 0; }
-            .form-row { grid-template-columns: 1fr; }
-            .draw-stats { display: none; }
+            .winning-row { display: none; }
+            .legend { display: none; }
+            .draw-date { min-width: auto; }
         }
     </style>
 </head>
 <body>
-    <div class="bg-grad"></div>
-
-    <nav>
-        <div class="nav-logo"><span class="dim">made</span><span class="acc">by</span>TK <span class="dim">/ toto</span></div>
-        <div class="nav-right" id="navRight">
-            <a href="https://curiouscabinet.tools" target="_blank" class="nav-link">CuriousCabinet</a>
-            <button class="btn-sm btn-accent" id="adminLoginBtn">Admin</button>
+    <div class="header">
+        <div class="header-left">
+            <h1>Toto Tracker</h1>
+            <div class="legend">
+                <span class="legend-item"><span class="legend-dot match"></span> Match</span>
+                <span class="legend-item"><span class="legend-dot bonus"></span> Bonus</span>
+                <span class="legend-item"><span class="legend-dot near"></span> ±1</span>
+            </div>
         </div>
-    </nav>
+        <div class="header-right" id="navRight">
+            <button class="btn-sm btn-admin" id="adminLoginBtn">Admin</button>
+        </div>
+    </div>
 
     <!-- LOGIN -->
     <div class="login-overlay" id="loginOverlay">
@@ -350,10 +271,6 @@
 
     <!-- PUBLIC VIEW -->
     <div id="publicView">
-        <div class="hero">
-            <h1>Singapore <span class="gradient">Toto</span> Tracker</h1>
-            <p>Predictions, bets placed, and draw results — all in one place</p>
-        </div>
         <div class="container" id="drawList">
             <div class="loading-bar"><span class="spinner"></span> Loading draws...</div>
         </div>
@@ -361,17 +278,16 @@
 
     <!-- ADMIN PANEL -->
     <div class="admin-panel" id="adminPanel">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;flex-wrap:wrap;gap:.75rem;">
-            <h2 style="margin:0;font-size:1.4rem;font-weight:800;">Admin Panel</h2>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+            <h2 style="margin:0;font-size:1.2rem;font-weight:800;">Admin Panel</h2>
             <div style="display:flex;gap:.5rem;">
-                <button class="btn-sm btn-ghost" id="backToPublic">← Back</button>
+                <button class="btn-sm btn-ghost" id="backToPublic">Back</button>
                 <button class="btn-sm btn-ghost" id="logoutBtn">Logout</button>
             </div>
         </div>
 
-        <!-- Upload Bet Slip -->
         <div class="admin-section">
-            <h3>📸 Upload Bet Slip</h3>
+            <h3>Upload Bet Slip</h3>
             <div class="upload-zone" id="uploadZone">
                 <input type="file" accept="image/*" id="betImageInput">
                 <div class="icon">📸</div>
@@ -382,28 +298,26 @@
                 <img id="previewImg" src="" alt="Bet slip preview">
             </div>
             <div class="btn-row">
-                <button class="btn btn-primary" id="extractBetsBtn" style="display:none;">🤖 Extract Bets with Claude</button>
+                <button class="btn btn-primary" id="extractBetsBtn" style="display:none;">Extract Bets with Claude</button>
             </div>
             <div class="status-msg" id="ocrStatus"></div>
             <div class="extracted-bets" id="extractedBets">
-                <h4>✓ Extracted Data</h4>
+                <h4>Extracted Data</h4>
                 <div id="extractedInfo"></div>
                 <div id="extractedList"></div>
             </div>
-
-            <div class="btn-row" style="margin-top:1.5rem;">
-                <button class="btn btn-success" id="saveDraw" style="display:none;">💾 Save Draw</button>
-                <button class="btn btn-danger" id="deleteDraw" style="display:none;">🗑 Delete Draw</button>
+            <div class="btn-row" style="margin-top:1rem;">
+                <button class="btn btn-success" id="saveDraw" style="display:none;">Save Draw</button>
+                <button class="btn btn-danger" id="deleteDraw" style="display:none;">Delete Draw</button>
                 <button class="btn-outline-sm" id="clearForm">Clear</button>
             </div>
             <div class="status-msg" id="saveStatus"></div>
         </div>
 
-        <!-- Draw History (Admin) -->
         <div class="admin-section">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-                <h3 style="margin:0;">📋 All Draws</h3>
-                <button class="btn-outline-sm" id="fetchAllResults">🌐 Fetch Missing Results</button>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
+                <h3 style="margin:0;">All Draws</h3>
+                <button class="btn-outline-sm" id="fetchAllResults">Fetch Missing Results</button>
             </div>
             <div class="status-msg" id="fetchResultsStatus"></div>
             <div id="adminDrawList"></div>
@@ -411,38 +325,30 @@
     </div>
 
     <footer>
-        <p>&copy; 2026 <a href="https://madebytk.com">madebytk.com</a> &middot; <a href="https://curiouscabinet.tools" target="_blank">CuriousCabinet.tools</a></p>
+        <p>&copy; 2026 <a href="https://madebytk.com">madebytk.com</a> · <a href="https://curiouscabinet.tools" target="_blank">CuriousCabinet.tools</a></p>
     </footer>
 
     <script>
     (function() {
-        /* ═══════════════════════════
-           SUPABASE INIT
-        ═══════════════════════════ */
         const SUPABASE_URL = 'https://iqiljoivefmuynsvgesk.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxaWxqb2l2ZWZtdXluc3ZnZXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDgwOTAsImV4cCI6MjA5Nzg4NDA5MH0.QJ2zv9oL3TrCNSdZi4Qx-CaHZND7xGlN5ZxgZMFAYYQ';
-
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-        // API base URL — served from the same domain via nginx reverse proxy
         const API_BASE = '/api';
-
-        /* ═══════════════════════════
-           HELPERS
-        ═══════════════════════════ */
         const $ = id => document.getElementById(id);
-
-        function parseNumbers(str) {
-            return str.split(/[,\s]+/).map(n => parseInt(n.trim())).filter(n => !isNaN(n) && n > 0 && n <= 49);
-        }
 
         function formatDate(dateStr) {
             const d = new Date(dateStr + 'T00:00:00');
-            return d.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+            return d.toLocaleDateString('en-SG', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
         }
 
-        function countMatches(betNumbers, winningNumbers, additional) {
-            const winSet = new Set(winningNumbers);
+        function pad(n) { return String(n).padStart(2, '0'); }
+
+        function isNear(n, winning) {
+            return winning.some(w => Math.abs(n - w) === 1 && n !== w);
+        }
+
+        function countMatches(betNumbers, winning, additional) {
+            const winSet = new Set(winning);
             let mainMatch = 0, addMatch = false;
             betNumbers.forEach(n => {
                 if (winSet.has(n)) mainMatch++;
@@ -466,52 +372,29 @@
             el.style.display = 'none';
         }
 
-        /* ═══════════════════════════
-           DATA — Supabase
-        ═══════════════════════════ */
+        /* ── DATA ── */
         async function fetchDraws() {
-            // Public reads go through the VM API
             try {
                 const resp = await fetch(`${API_BASE}/draws`);
                 if (resp.ok) return await resp.json();
             } catch (e) {
                 console.warn('API fetch failed, falling back to Supabase:', e);
             }
-            // Fallback to direct Supabase if API is down
             const { data, error } = await supabase
-                .from('draws')
-                .select('*')
-                .order('draw_date', { ascending: false });
+                .from('draws').select('*').order('draw_date', { ascending: false });
             if (error) { console.error('Fetch draws error:', error); return []; }
             return data || [];
         }
 
         async function upsertDraw(draw) {
             if (draw.id) {
-                const { data, error } = await supabase
-                    .from('draws')
-                    .update({
-                        draw_date: draw.draw_date,
-                        draw_number: draw.draw_number,
-                        predictions: draw.predictions,
-                        bets: draw.bets,
-                        results: draw.results
-                    })
-                    .eq('id', draw.id)
-                    .select();
-                return { data, error };
+                return await supabase.from('draws')
+                    .update({ draw_date: draw.draw_date, draw_number: draw.draw_number, predictions: draw.predictions, bets: draw.bets, results: draw.results })
+                    .eq('id', draw.id).select();
             } else {
-                const { data, error } = await supabase
-                    .from('draws')
-                    .insert({
-                        draw_date: draw.draw_date,
-                        draw_number: draw.draw_number,
-                        predictions: draw.predictions,
-                        bets: draw.bets,
-                        results: draw.results
-                    })
+                return await supabase.from('draws')
+                    .insert({ draw_date: draw.draw_date, draw_number: draw.draw_number, predictions: draw.predictions, bets: draw.bets, results: draw.results })
                     .select();
-                return { data, error };
             }
         }
 
@@ -519,37 +402,23 @@
             return await supabase.from('draws').delete().eq('id', id);
         }
 
-        async function getSetting(key) {
-            const { data } = await supabase.from('settings').select('value').eq('key', key).single();
-            return data ? data.value : null;
-        }
-
-        async function setSetting(key, value) {
-            const { error } = await supabase.from('settings').upsert({ key, value }, { onConflict: 'key' });
-            return !error;
-        }
-
-        /* ═══════════════════════════
-           RENDER PUBLIC DRAWS
-        ═══════════════════════════ */
+        /* ── RENDER PUBLIC ── */
         async function renderPublicDraws() {
             const container = $('drawList');
             container.innerHTML = '<div class="loading-bar"><span class="spinner"></span> Loading draws...</div>';
-
             const draws = await fetchDraws();
 
             if (draws.length === 0) {
-                container.innerHTML = `<div class="empty-state">
-                    <div class="icon">🎱</div>
-                    <h3>No draws yet</h3>
-                    <p>Draw history will appear here once data is added.</p>
-                </div>`;
+                container.innerHTML = '<div class="empty-state"><p>No draws yet.</p></div>';
                 return;
             }
 
             container.innerHTML = draws.map((draw, i) => {
                 const hasResults = draw.results && draw.results.winning && draw.results.winning.length > 0;
                 const hasBets = draw.bets && draw.bets.length > 0;
+                const hasPreds = draw.predictions && draw.predictions.length > 0;
+
+                // Best match across all bets
                 let bestMatch = 0;
                 if (hasResults && hasBets) {
                     draw.bets.forEach(bet => {
@@ -557,26 +426,34 @@
                         if (mainMatch > bestMatch) bestMatch = mainMatch;
                     });
                 }
-                const matchLabel = hasResults ? (bestMatch > 0 ? `${bestMatch} match${bestMatch>1?'es':''}` : 'No matches') : 'Pending';
-                const matchClass = bestMatch > 0 ? 'has-match' : 'no-match';
 
-                return `<div class="draw-card ${i===0?'open':''}" data-idx="${i}">
+                const statsText = `${(draw.bets||[]).length}b`;
+                const matchColor = bestMatch >= 3 ? 'green' : bestMatch > 0 ? 'amber' : 'gray';
+
+                return `<div class="draw-card ${i === 0 ? 'open' : ''}" data-idx="${i}">
                     <div class="draw-header" onclick="this.parentElement.classList.toggle('open')">
-                        <div class="draw-title">
+                        <div class="draw-left">
                             <span class="draw-date">${formatDate(draw.draw_date)}</span>
-                            ${draw.draw_number ? `<span class="draw-num">Draw #${draw.draw_number}</span>` : ''}
+                            ${draw.draw_number ? `<span class="draw-num">#${draw.draw_number}</span>` : ''}
+                            ${hasResults ? `
+                                <div class="winning-row">
+                                    ${draw.results.winning.map(n => `<span class="ball win">${pad(n)}</span>`).join('')}
+                                    ${draw.results.additional != null ? `<span class="plus-sign">+</span><span class="ball bonus-ball">${pad(draw.results.additional)}</span>` : ''}
+                                </div>
+                            ` : ''}
                         </div>
-                        <div class="draw-stats">
-                            <span class="match-badge ${matchClass}">${matchLabel}</span>
+                        <div class="draw-right">
+                            <span class="draw-stats-text">${hasBets ? statsText : ''}</span>
+                            ${hasResults && hasBets ? `<span class="match-count ${matchColor}">${bestMatch}</span>` : ''}
                             <span class="chevron">▾</span>
                         </div>
                     </div>
                     <div class="draw-body">
+                        ${(hasPreds || hasBets) ? `
                         <div class="draw-columns">
-                            ${renderPredCol(draw)}
-                            ${renderBetsCol(draw)}
-                            ${renderResultsCol(draw)}
-                        </div>
+                            ${hasPreds ? renderPredCol(draw) : ''}
+                            ${hasBets ? renderBetsCol(draw) : ''}
+                        </div>` : '<p class="no-data">No predictions or bets for this draw.</p>'}
                     </div>
                 </div>`;
             }).join('');
@@ -584,52 +461,57 @@
 
         function renderPredCol(draw) {
             const preds = draw.predictions || [];
+            const hasResults = draw.results && draw.results.winning && draw.results.winning.length > 0;
+            const winning = hasResults ? draw.results.winning : [];
+            const additional = hasResults ? draw.results.additional : null;
+
             return `<div class="draw-col">
-                <h4>Predictions <span class="count">(${preds.length})</span></h4>
-                ${preds.length === 0 ? '<p class="no-data">No predictions</p>' :
-                    preds.map(set => `<div class="num-row">${set.map(n => `<span class="ball">${String(n).padStart(2,'0')}</span>`).join('')}</div>`).join('')}
+                <h4>Predictions (${preds.length})</h4>
+                ${preds.map((set, idx) => {
+                    let matchCount = 0;
+                    const balls = set.map(n => {
+                        let cls = 'ball';
+                        if (winning.includes(n)) { cls += ' match'; matchCount++; }
+                        else if (n === additional) { cls += ' bonus-match'; }
+                        else if (hasResults && isNear(n, winning)) { cls += ' near'; }
+                        return `<span class="${cls}">${pad(n)}</span>`;
+                    }).join('');
+                    return `<div class="line-row">
+                        <span class="line-num">${idx + 1}</span>
+                        <div class="line-balls">${balls}</div>
+                        ${hasResults ? `<span class="line-match">${matchCount > 0 ? matchCount : '—'}</span>` : ''}
+                    </div>`;
+                }).join('')}
             </div>`;
         }
 
         function renderBetsCol(draw) {
             const bets = draw.bets || [];
             const hasResults = draw.results && draw.results.winning && draw.results.winning.length > 0;
+            const winning = hasResults ? draw.results.winning : [];
+            const additional = hasResults ? draw.results.additional : null;
+
             return `<div class="draw-col">
-                <h4>Bets Placed <span class="count">(${bets.length})</span></h4>
-                ${bets.length === 0 ? '<p class="no-data">No bets</p>' :
-                    bets.map(bet => {
-                        const typeClass = getBetTypeClass(bet.type);
-                        return `<div class="bet-group">
-                            <span class="bet-type ${typeClass}">${bet.type}</span>
-                            <div class="num-row">${bet.numbers.map(n => {
-                                let cls = 'ball';
-                                if (hasResults) {
-                                    if (draw.results.winning.includes(n)) cls += ' match';
-                                    else if (n === draw.results.additional) cls += ' additional match';
-                                }
-                                return `<span class="${cls}">${String(n).padStart(2,'0')}</span>`;
-                            }).join('')}</div>
-                        </div>`;
-                    }).join('')}
+                <h4>Bets (${bets.length})</h4>
+                ${bets.map((bet, idx) => {
+                    let matchCount = 0;
+                    const balls = bet.numbers.map(n => {
+                        let cls = 'ball';
+                        if (winning.includes(n)) { cls += ' match'; matchCount++; }
+                        else if (n === additional) { cls += ' bonus-match'; }
+                        else if (hasResults && isNear(n, winning)) { cls += ' near'; }
+                        return `<span class="${cls}">${pad(n)}</span>`;
+                    }).join('');
+                    return `<div class="line-row">
+                        <span class="line-num">${idx + 1}</span>
+                        <div class="line-balls">${balls}</div>
+                        ${hasResults ? `<span class="line-match">${matchCount > 0 ? matchCount : '—'}</span>` : ''}
+                    </div>`;
+                }).join('')}
             </div>`;
         }
 
-        function renderResultsCol(draw) {
-            const res = draw.results;
-            const hasResults = res && res.winning && res.winning.length > 0;
-            return `<div class="draw-col">
-                <h4>Draw Results</h4>
-                ${!hasResults ? '<p class="no-data">Results pending</p>' : `
-                    <div class="num-row">
-                        ${res.winning.map(n => `<span class="ball winning">${String(n).padStart(2,'0')}</span>`).join('')}
-                        ${res.additional ? `<span class="plus-sign">+</span><span class="ball additional">${String(res.additional).padStart(2,'0')}</span>` : ''}
-                    </div>`}
-            </div>`;
-        }
-
-        /* ═══════════════════════════
-           AUTH — Supabase Auth
-        ═══════════════════════════ */
+        /* ── AUTH ── */
         let currentUser = null;
 
         $('adminLoginBtn').onclick = () => { $('loginOverlay').classList.add('show'); $('loginEmail').focus(); };
@@ -641,21 +523,12 @@
             const email = $('loginEmail').value.trim();
             const pass = $('loginPass').value;
             if (!email || !pass) return;
-
             $('loginSubmit').textContent = 'Signing in...';
             $('loginSubmit').disabled = true;
-
             const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
-
             $('loginSubmit').textContent = 'Login';
             $('loginSubmit').disabled = false;
-
-            if (error) {
-                $('loginError').textContent = error.message;
-                $('loginError').style.display = 'block';
-                return;
-            }
-
+            if (error) { $('loginError').textContent = error.message; $('loginError').style.display = 'block'; return; }
             currentUser = data.user;
             $('loginOverlay').classList.remove('show');
             $('loginEmail').value = ''; $('loginPass').value = '';
@@ -663,14 +536,9 @@
             showAdmin();
         };
 
-        $('logoutBtn').onclick = async () => {
-            await supabase.auth.signOut();
-            currentUser = null;
-            showPublic();
-        };
+        $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); currentUser = null; showPublic(); };
         $('backToPublic').onclick = () => showPublic();
 
-        // Check existing session on load
         supabase.auth.getSession().then(({ data: { session } }) => {
             if (session) currentUser = session.user;
         });
@@ -679,12 +547,10 @@
             $('publicView').style.display = 'none';
             $('adminPanel').classList.add('active');
             $('navRight').innerHTML = `
-                <a href="https://curiouscabinet.tools" target="_blank" class="nav-link">CuriousCabinet</a>
                 <button class="btn-sm btn-ghost" id="navBackBtn">Public View</button>
-                <button class="btn-sm btn-accent" id="navLogoutBtn">Logout</button>`;
+                <button class="btn-sm btn-logout" id="navLogoutBtn">Logout</button>`;
             $('navBackBtn').onclick = () => showPublic();
             $('navLogoutBtn').onclick = async () => { await supabase.auth.signOut(); currentUser = null; showPublic(); };
-
             await renderAdminDrawList();
             resetForm();
         }
@@ -692,9 +558,7 @@
         function showPublic() {
             $('adminPanel').classList.remove('active');
             $('publicView').style.display = 'block';
-            $('navRight').innerHTML = `
-                <a href="https://curiouscabinet.tools" target="_blank" class="nav-link">CuriousCabinet</a>
-                <button class="btn-sm btn-accent" id="adminLoginBtn">Admin</button>`;
+            $('navRight').innerHTML = `<button class="btn-sm btn-admin" id="adminLoginBtn">Admin</button>`;
             $('adminLoginBtn').onclick = () => {
                 if (currentUser) showAdmin();
                 else { $('loginOverlay').classList.add('show'); $('loginEmail').focus(); }
@@ -702,9 +566,7 @@
             renderPublicDraws();
         }
 
-        /* ═══════════════════════════
-           ADMIN — Image OCR (Backend)
-        ═══════════════════════════ */
+        /* ── ADMIN — Image OCR ── */
         let uploadedFile = null;
         let extractedData = null;
         let editingDrawId = null;
@@ -716,9 +578,7 @@
             e.preventDefault(); uploadZone.classList.remove('dragover');
             if (e.dataTransfer.files.length) handleImageFile(e.dataTransfer.files[0]);
         };
-        $('betImageInput').onchange = e => {
-            if (e.target.files.length) handleImageFile(e.target.files[0]);
-        };
+        $('betImageInput').onchange = e => { if (e.target.files.length) handleImageFile(e.target.files[0]); };
 
         function handleImageFile(file) {
             uploadedFile = file;
@@ -736,106 +596,58 @@
 
         $('extractBetsBtn').onclick = async () => {
             if (!uploadedFile) return;
-
             showStatus('ocrStatus', 'loading', 'Extracting bets from image...');
-
             try {
                 const formData = new FormData();
                 formData.append('image', uploadedFile);
-
                 const response = await fetch('/api/extract-bets', { method: 'POST', body: formData });
-
-                if (!response.ok) {
-                    const err = await response.json();
-                    throw new Error(err.detail || 'Server error');
-                }
-
+                if (!response.ok) { const err = await response.json(); throw new Error(err.detail || 'Server error'); }
                 extractedData = await response.json();
                 const bets = extractedData.bets || [];
-
-                // Show extracted info
                 let infoHtml = '';
-                if (extractedData.draw_date) infoHtml += `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem;">Draw Date: <strong style="color:var(--text);">${extractedData.draw_date}</strong></p>`;
-                if (extractedData.draw_number) infoHtml += `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.5rem;">Draw #: <strong style="color:var(--text);">${extractedData.draw_number}</strong></p>`;
+                if (extractedData.draw_date) infoHtml += `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.2rem;">Draw Date: <strong>${extractedData.draw_date}</strong></p>`;
+                if (extractedData.draw_number) infoHtml += `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.4rem;">Draw #: <strong>${extractedData.draw_number}</strong></p>`;
                 $('extractedInfo').innerHTML = infoHtml;
-
                 $('extractedList').innerHTML = bets.map(bet =>
                     `<div class="extracted-bet-item">
-                        <span class="bet-type ${getBetTypeClass(bet.type)}">${bet.type}</span>
-                        <div class="num-row" style="margin:0;">
-                            ${bet.numbers.map(n => `<span class="ball">${String(n).padStart(2,'0')}</span>`).join('')}
-                        </div>
+                        <span class="bet-type-tag">${bet.type}</span>
+                        <div class="line-balls">${bet.numbers.map(n => `<span class="ball">${pad(n)}</span>`).join('')}</div>
                     </div>`
                 ).join('');
                 $('extractedBets').style.display = 'block';
                 $('saveDraw').style.display = 'inline-flex';
-
                 showStatus('ocrStatus', 'success', `Extracted ${bets.length} bet(s) successfully!`);
             } catch(err) {
                 showStatus('ocrStatus', 'error', `Extraction failed: ${err.message}`);
             }
         };
 
-        /* ═══════════════════════════
-           ADMIN — Save / Delete Draw
-        ═══════════════════════════ */
-
+        /* ── ADMIN — Save / Delete ── */
         $('saveDraw').onclick = async () => {
-            if (!extractedData && !editingDrawId) {
-                showStatus('saveStatus', 'error', 'Upload and extract a bet slip first.');
-                return;
-            }
-
+            if (!extractedData && !editingDrawId) { showStatus('saveStatus', 'error', 'Upload and extract a bet slip first.'); return; }
             showStatus('saveStatus', 'loading', 'Saving draw...');
-
             const bets = extractedData ? (extractedData.bets || []) : [];
             const drawDate = extractedData ? extractedData.draw_date : null;
             const drawNumber = extractedData ? extractedData.draw_number : null;
-
-            if (!drawDate) {
-                showStatus('saveStatus', 'error', 'Could not determine draw date from the image. Please try again.');
-                return;
-            }
-
-            const draw = {
-                id: editingDrawId || undefined,
-                draw_date: drawDate,
-                draw_number: drawNumber || '',
-                predictions: [],
-                bets,
-                results: { winning: [], additional: null }
-            };
-
+            if (!drawDate) { showStatus('saveStatus', 'error', 'Could not determine draw date from the image.'); return; }
+            const draw = { id: editingDrawId || undefined, draw_date: drawDate, draw_number: drawNumber || '', predictions: [], bets, results: { winning: [], additional: null } };
             const { data, error } = await upsertDraw(draw);
-
-            if (error) {
-                showStatus('saveStatus', 'error', `Save failed: ${error.message}`);
-            } else {
-                showStatus('saveStatus', 'success', 'Draw saved!');
-                await renderAdminDrawList();
-                setTimeout(() => resetForm(), 1000);
-            }
+            if (error) { showStatus('saveStatus', 'error', `Save failed: ${error.message}`); }
+            else { showStatus('saveStatus', 'success', 'Draw saved!'); await renderAdminDrawList(); setTimeout(() => resetForm(), 1000); }
         };
 
         $('deleteDraw').onclick = async () => {
             if (!editingDrawId || !confirm('Delete this draw?')) return;
             showStatus('saveStatus', 'loading', 'Deleting...');
             const { error } = await deleteDraw(editingDrawId);
-            if (error) {
-                showStatus('saveStatus', 'error', `Delete failed: ${error.message}`);
-            } else {
-                showStatus('saveStatus', 'success', 'Draw deleted');
-                await renderAdminDrawList();
-                resetForm();
-            }
+            if (error) { showStatus('saveStatus', 'error', `Delete failed: ${error.message}`); }
+            else { showStatus('saveStatus', 'success', 'Draw deleted'); await renderAdminDrawList(); resetForm(); }
         };
 
         $('clearForm').onclick = () => resetForm();
 
         function resetForm() {
-            editingDrawId = null;
-            uploadedFile = null;
-            extractedData = null;
+            editingDrawId = null; uploadedFile = null; extractedData = null;
             $('uploadPreview').style.display = 'none';
             $('extractBetsBtn').style.display = 'none';
             $('extractedBets').style.display = 'none';
@@ -847,19 +659,14 @@
         function loadDrawIntoForm(draw) {
             editingDrawId = draw.id;
             extractedData = { draw_date: draw.draw_date, draw_number: draw.draw_number, bets: draw.bets || [] };
-
-            // Show existing bets
-            let infoHtml = `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.3rem;">Draw Date: <strong style="color:var(--text);">${draw.draw_date}</strong></p>`;
-            if (draw.draw_number) infoHtml += `<p style="font-size:.85rem;color:var(--text-dim);margin-bottom:.5rem;">Draw #: <strong style="color:var(--text);">${draw.draw_number}</strong></p>`;
+            let infoHtml = `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.2rem;">Draw Date: <strong>${draw.draw_date}</strong></p>`;
+            if (draw.draw_number) infoHtml += `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.4rem;">Draw #: <strong>${draw.draw_number}</strong></p>`;
             $('extractedInfo').innerHTML = infoHtml;
-
             const bets = draw.bets || [];
             $('extractedList').innerHTML = bets.map(bet =>
                 `<div class="extracted-bet-item">
-                    <span class="bet-type ${getBetTypeClass(bet.type)}">${bet.type}</span>
-                    <div class="num-row" style="margin:0;">
-                        ${bet.numbers.map(n => `<span class="ball">${String(n).padStart(2,'0')}</span>`).join('')}
-                    </div>
+                    <span class="bet-type-tag">${bet.type}</span>
+                    <div class="line-balls">${bet.numbers.map(n => `<span class="ball">${pad(n)}</span>`).join('')}</div>
                 </div>`
             ).join('');
             $('extractedBets').style.display = bets.length ? 'block' : 'none';
@@ -868,11 +675,9 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        /* ═══════════════════════════
-           ADMIN — Fetch Missing Results
-        ═══════════════════════════ */
+        /* ── ADMIN — Fetch Missing Results ── */
         $('fetchAllResults').onclick = async () => {
-            showStatus('fetchResultsStatus', 'loading', 'Fetching results from Singapore Pools...');
+            showStatus('fetchResultsStatus', 'loading', 'Fetching results...');
             try {
                 const res = await fetch('/api/fetch-results', { method: 'POST' });
                 const data = await res.json();
@@ -884,19 +689,17 @@
             }
         };
 
-        /* ═══════════════════════════
-           ADMIN — Draw List
-        ═══════════════════════════ */
+        /* ── ADMIN — Draw List ── */
         async function renderAdminDrawList() {
             const draws = await fetchDraws();
             $('adminDrawList').innerHTML = draws.length === 0
                 ? '<p class="no-data">No draws yet. Add one above.</p>'
                 : draws.map(d => `
-                    <div style="display:flex;align-items:center;justify-content:space-between;padding:.6rem 0;border-bottom:1px solid rgba(255,255,255,.03);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;padding:.5rem 0;border-bottom:1px solid var(--border-light);">
                         <div>
-                            <strong style="font-family:'JetBrains Mono',monospace;font-size:.88rem;">${formatDate(d.draw_date)}</strong>
-                            ${d.draw_number ? `<span style="color:var(--text-muted);font-size:.75rem;margin-left:.5rem;">#${d.draw_number}</span>` : ''}
-                            <span style="color:var(--text-muted);font-size:.75rem;margin-left:.5rem;">
+                            <strong style="font-family:'JetBrains Mono',monospace;font-size:.85rem;">${formatDate(d.draw_date)}</strong>
+                            ${d.draw_number ? `<span style="color:var(--text-muted);font-size:.72rem;margin-left:.5rem;">#${d.draw_number}</span>` : ''}
+                            <span style="color:var(--text-muted);font-size:.72rem;margin-left:.5rem;">
                                 ${(d.predictions||[]).length}P · ${(d.bets||[]).length}B · ${d.results && d.results.winning && d.results.winning.length ? '✓R' : '—R'}
                             </span>
                         </div>
@@ -913,9 +716,7 @@
             });
         }
 
-        /* ═══════════════════════════
-           INIT
-        ═══════════════════════════ */
+        /* ── INIT ── */
         renderPublicDraws();
     })();
     </script>
