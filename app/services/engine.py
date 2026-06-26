@@ -20,6 +20,15 @@ POS_RANGES = [
 
 HOT_NUMBERS = {3, 10, 15, 22, 32, 34, 35, 37, 38, 39, 48}
 
+# Long-term position averages (validated across 100 draws)
+POS_AVERAGES = [6.6, 13.6, 21.4, 27.8, 35.6, 42.7]
+
+# Mean-reversion threshold: if prev deviates more than this from avg, apply pull
+REVERSION_THRESHOLD = 3.0
+
+# Mean-reversion applies to middle positions only (P2-P5, 0-indexed: 1-4)
+REVERSION_POSITIONS = {1, 2, 3, 4}
+
 
 @dataclass(slots=True)
 class ScoredPick:
@@ -111,22 +120,61 @@ def score_filter(pick: list[int], prev: list[int]) -> ScoredPick:
 
 
 def score_position(n: int, pos: int, last_draw: list[int]) -> tuple[int, list[str]]:
-    """Score a single number for position-level confidence."""
+    """Score a single number for position-level confidence.
+
+    For P1/P6 (anchors): primarily reward proximity to previous draw.
+    For P2-P5 (middle): blend proximity with mean-reversion pull when
+    the previous draw was extreme (far from long-term average).
+    """
     sc = 0
     reasons = []
     prev_at_pos = sorted(last_draw)[pos]
+    avg_at_pos = POS_AVERAGES[pos]
+    deviation = prev_at_pos - avg_at_pos  # positive = prev was high, negative = low
+    dev_magnitude = abs(deviation)
+    is_extreme = dev_magnitude > REVERSION_THRESHOLD
+    is_middle = pos in REVERSION_POSITIONS
 
+    # ── Proximity to previous draw ──
+    # Full weight for anchors (P1, P6); reduced for middle positions when extreme
     shift = abs(n - prev_at_pos)
+    prox_weight = 1.0
+    if is_middle and is_extreme:
+        # Dampen proximity reward — the draw is likely to move away
+        prox_weight = 0.5
+
     if shift <= 1:
-        sc += 5
+        prox_pts = int(5 * prox_weight)
+        sc += prox_pts
         reasons.append(f"±1 from P{pos + 1}={prev_at_pos}")
     elif shift <= 3:
-        sc += 3
+        prox_pts = int(3 * prox_weight)
+        sc += prox_pts
         reasons.append(f"±3 from P{pos + 1}={prev_at_pos}")
     elif shift <= 5:
         sc += 1
         reasons.append(f"±5 from P{pos + 1}")
 
+    # ── Mean reversion (P2-P5 only, when previous was extreme) ──
+    if is_middle and is_extreme:
+        dist_n_to_avg = abs(n - avg_at_pos)
+        dist_prev_to_avg = dev_magnitude
+
+        # How much closer to avg is this candidate vs prev?
+        reversion_frac = 1.0 - (dist_n_to_avg / dist_prev_to_avg) if dist_prev_to_avg > 0 else 0
+
+        if reversion_frac > 0:
+            # Scale bonus: larger deviation = stronger pull (max +6)
+            bonus = min(6, int(reversion_frac * dev_magnitude * 0.8))
+            if bonus > 0:
+                sc += bonus
+                reasons.append(f"revert→avg({avg_at_pos:.0f}) +{bonus}")
+        elif dist_n_to_avg <= 3:
+            # Even if not "between," reward being near the average
+            sc += 2
+            reasons.append(f"near avg({avg_at_pos:.0f})")
+
+    # ── Neighborhood echo (near ANY number in last draw) ──
     for p in last_draw:
         if 0 < abs(n - p) <= 2:
             sc += 3
@@ -137,10 +185,12 @@ def score_position(n: int, pos: int, last_draw: list[int]) -> tuple[int, list[st
             reasons.append(f"±3 of {p}")
             break
 
+    # ── Repeat from last draw ──
     if n in last_draw:
         sc += 2
         reasons.append("repeat")
 
+    # ── Complement potential ──
     comp = 50 - n
     if 1 <= comp <= 49 and comp != n:
         for pp, (lo, hi) in enumerate(POS_RANGES):
@@ -149,6 +199,7 @@ def score_position(n: int, pos: int, last_draw: list[int]) -> tuple[int, list[st
                 reasons.append(f"comp={comp}")
                 break
 
+    # ── Hot number bonus ──
     if n in HOT_NUMBERS:
         sc += 1
         reasons.append("hot")
@@ -203,7 +254,7 @@ def generate_concentrated(last_draw: list[int]) -> list[ScoredPick]:
 
 def generate_diverse(
     last_draw: list[int],
-    n_lines: int = 5,
+    n_lines: int = 3,
     exclude: set[int] | None = None,
     seed: int | None = None,
 ) -> tuple[list[ScoredPick], int]:
@@ -283,7 +334,7 @@ def generate_all(
         used.update(conc_best[0].pick)
 
     diverse, total_passed = generate_diverse(
-        last_draw, n_lines=5, exclude=used, seed=seed,
+        last_draw, n_lines=3, exclude=used, seed=seed,
     )
     used.update(n for line in diverse for n in line.pick)
 
@@ -302,6 +353,7 @@ def run_postmortem(
 ) -> dict:
     """Run post-mortem analysis."""
     actual_set = set(actual)
+    actual_bonus = set(actual + ([bonus] if bonus else []))
 
     # Rule check on actual
     result = score_filter(actual, prev_draw)
@@ -338,7 +390,6 @@ def run_postmortem(
         line_results.append({
             "line_number": i + 1,
             "numbers": pick,
-            "strategy": "unknown",
             "exact_matches": exact,
             "exact_count": match_count,
             "bonus_match": bonus_hit,

@@ -47,6 +47,18 @@ class Settings(BaseSettings):
 
     # ── Scraper ───────────────────────────────────────────────────────────────
     scraper_timeout: int
+    scraper_user_agent: str
+
+    # ── Data Sources ─────────────────────────────────────────────────────────
+    singapore_pools_url: str
+    lottolyzer_url: str
+    lottery_extreme_url: str
+    toto_api_url: str
+
+    # ── Claude AI ────────────────────────────────────────────────────────────
+    claude_model: str
+    claude_max_tokens: int
+    pally_api_timeout: int
 
     class Config:
         env_file          = (".env.config", ".env.secret")

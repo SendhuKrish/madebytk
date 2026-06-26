@@ -10,12 +10,10 @@ from app.utils.config import settings
 
 logger = logging.getLogger(__name__)
 
-LOTTOLYZER_URL = (
-    "https://en.lottolyzer.com/history/singapore/toto/page/1/per-page/1/number-view"
-)
-LOTTERY_EXTREME_URL = "https://www.lotteryextreme.com/singapore/toto-results"
+LOTTOLYZER_URL = f"{settings.lottolyzer_url}/page/1/per-page/1/number-view"
+LOTTERY_EXTREME_URL = settings.lottery_extreme_url
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; TotoEngine/3.0)"}
+HEADERS = {"User-Agent": settings.scraper_user_agent}
 TIMEOUT = float(settings.scraper_timeout)
 
 
@@ -131,7 +129,7 @@ async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
     Returns list of dicts with keys: draw_number, date, winning, additional.
     """
     results = []
-    url = f"https://en.lottolyzer.com/history/singapore/toto/page/1/per-page/{pages * 50}/number-view"
+    url = f"{settings.lottolyzer_url}/page/1/per-page/{pages * 50}/number-view"
 
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:

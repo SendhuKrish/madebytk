@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <!-- No external SDKs — all data via /api/ backend -->
     <style>
         *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
@@ -261,7 +261,7 @@
         <button class="login-close" id="loginClose">&times;</button>
         <div class="login-box">
             <h2>Admin Login</h2>
-            <p class="sub">Sign in with your Supabase account</p>
+            <p class="sub">Sign in to manage draws</p>
             <input type="email" class="login-field" id="loginEmail" placeholder="Email" autocomplete="email">
             <input type="password" class="login-field" id="loginPass" placeholder="Password" autocomplete="current-password">
             <button class="login-submit" id="loginSubmit">Login</button>
@@ -330,10 +330,7 @@
 
     <script>
     (function() {
-        const SUPABASE_URL = 'https://iqiljoivefmuynsvgesk.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlxaWxqb2l2ZWZtdXluc3ZnZXNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIzMDgwOTAsImV4cCI6MjA5Nzg4NDA5MH0.QJ2zv9oL3TrCNSdZi4Qx-CaHZND7xGlN5ZxgZMFAYYQ';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        const API_BASE = '/api';
+        const API = '/api';
         const $ = id => document.getElementById(id);
 
         function formatDate(dateStr) {
@@ -357,10 +354,6 @@
             return { mainMatch, addMatch };
         }
 
-        function getBetTypeClass(type) {
-            return type.toLowerCase().replace(/[\s-]/g, '');
-        }
-
         function showStatus(id, type, msg) {
             const el = $(id);
             el.className = 'status-msg ' + type;
@@ -372,34 +365,36 @@
             el.style.display = 'none';
         }
 
-        /* ── DATA ── */
+        /* ── DATA (all via backend API) ── */
         async function fetchDraws() {
             try {
-                const resp = await fetch(`${API_BASE}/draws`);
+                const resp = await fetch(`${API}/draws`);
                 if (resp.ok) return await resp.json();
             } catch (e) {
-                console.warn('API fetch failed, falling back to Supabase:', e);
+                console.error('Fetch draws failed:', e);
             }
-            const { data, error } = await supabase
-                .from('draws').select('*').order('draw_date', { ascending: false });
-            if (error) { console.error('Fetch draws error:', error); return []; }
-            return data || [];
+            return [];
         }
 
-        async function upsertDraw(draw) {
-            if (draw.id) {
-                return await supabase.from('draws')
-                    .update({ draw_date: draw.draw_date, draw_number: draw.draw_number, predictions: draw.predictions, bets: draw.bets, results: draw.results })
-                    .eq('id', draw.id).select();
-            } else {
-                return await supabase.from('draws')
-                    .insert({ draw_date: draw.draw_date, draw_number: draw.draw_number, predictions: draw.predictions, bets: draw.bets, results: draw.results })
-                    .select();
+        async function saveDraw(draw) {
+            const resp = await fetch(`${API}/draws`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(draw),
+            });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || 'Save failed');
             }
+            return await resp.json();
         }
 
         async function deleteDraw(id) {
-            return await supabase.from('draws').delete().eq('id', id);
+            const resp = await fetch(`${API}/draws/${id}`, { method: 'DELETE' });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                throw new Error(err.detail || 'Delete failed');
+            }
         }
 
         /* ── RENDER PUBLIC ── */
@@ -418,7 +413,6 @@
                 const hasBets = draw.bets && draw.bets.length > 0;
                 const hasPreds = draw.predictions && draw.predictions.length > 0;
 
-                // Best match across all bets
                 let bestMatch = 0;
                 if (hasResults && hasBets) {
                     draw.bets.forEach(bet => {
@@ -511,7 +505,7 @@
             </div>`;
         }
 
-        /* ── AUTH ── */
+        /* ── AUTH (via backend API) ── */
         let currentUser = null;
 
         $('adminLoginBtn').onclick = () => { $('loginOverlay').classList.add('show'); $('loginEmail').focus(); };
@@ -525,23 +519,29 @@
             if (!email || !pass) return;
             $('loginSubmit').textContent = 'Signing in...';
             $('loginSubmit').disabled = true;
-            const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+            try {
+                const resp = await fetch(`${API}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password: pass }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) throw new Error(data.detail || 'Login failed');
+                currentUser = data.user;
+                $('loginOverlay').classList.remove('show');
+                $('loginEmail').value = ''; $('loginPass').value = '';
+                $('loginError').style.display = 'none';
+                showAdmin();
+            } catch (err) {
+                $('loginError').textContent = err.message;
+                $('loginError').style.display = 'block';
+            }
             $('loginSubmit').textContent = 'Login';
             $('loginSubmit').disabled = false;
-            if (error) { $('loginError').textContent = error.message; $('loginError').style.display = 'block'; return; }
-            currentUser = data.user;
-            $('loginOverlay').classList.remove('show');
-            $('loginEmail').value = ''; $('loginPass').value = '';
-            $('loginError').style.display = 'none';
-            showAdmin();
         };
 
-        $('logoutBtn').onclick = async () => { await supabase.auth.signOut(); currentUser = null; showPublic(); };
+        $('logoutBtn').onclick = () => { currentUser = null; showPublic(); };
         $('backToPublic').onclick = () => showPublic();
-
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session) currentUser = session.user;
-        });
 
         async function showAdmin() {
             $('publicView').style.display = 'none';
@@ -550,7 +550,7 @@
                 <button class="btn-sm btn-ghost" id="navBackBtn">Public View</button>
                 <button class="btn-sm btn-logout" id="navLogoutBtn">Logout</button>`;
             $('navBackBtn').onclick = () => showPublic();
-            $('navLogoutBtn').onclick = async () => { await supabase.auth.signOut(); currentUser = null; showPublic(); };
+            $('navLogoutBtn').onclick = () => { currentUser = null; showPublic(); };
             await renderAdminDrawList();
             resetForm();
         }
@@ -600,7 +600,7 @@
             try {
                 const formData = new FormData();
                 formData.append('image', uploadedFile);
-                const response = await fetch('/api/extract-bets', { method: 'POST', body: formData });
+                const response = await fetch(`${API}/extract-bets`, { method: 'POST', body: formData });
                 if (!response.ok) { const err = await response.json(); throw new Error(err.detail || 'Server error'); }
                 extractedData = await response.json();
                 const bets = extractedData.bets || [];
@@ -630,18 +630,29 @@
             const drawDate = extractedData ? extractedData.draw_date : null;
             const drawNumber = extractedData ? extractedData.draw_number : null;
             if (!drawDate) { showStatus('saveStatus', 'error', 'Could not determine draw date from the image.'); return; }
-            const draw = { id: editingDrawId || undefined, draw_date: drawDate, draw_number: drawNumber || '', predictions: [], bets, results: { winning: [], additional: null } };
-            const { data, error } = await upsertDraw(draw);
-            if (error) { showStatus('saveStatus', 'error', `Save failed: ${error.message}`); }
-            else { showStatus('saveStatus', 'success', 'Draw saved!'); await renderAdminDrawList(); setTimeout(() => resetForm(), 1000); }
+            const draw = { draw_date: drawDate, draw_number: drawNumber || '', predictions: [], bets, results: { winning: [], additional: null } };
+            if (editingDrawId) draw.id = editingDrawId;
+            try {
+                await saveDraw(draw);
+                showStatus('saveStatus', 'success', 'Draw saved!');
+                await renderAdminDrawList();
+                setTimeout(() => resetForm(), 1000);
+            } catch (err) {
+                showStatus('saveStatus', 'error', `Save failed: ${err.message}`);
+            }
         };
 
         $('deleteDraw').onclick = async () => {
             if (!editingDrawId || !confirm('Delete this draw?')) return;
             showStatus('saveStatus', 'loading', 'Deleting...');
-            const { error } = await deleteDraw(editingDrawId);
-            if (error) { showStatus('saveStatus', 'error', `Delete failed: ${error.message}`); }
-            else { showStatus('saveStatus', 'success', 'Draw deleted'); await renderAdminDrawList(); resetForm(); }
+            try {
+                await deleteDraw(editingDrawId);
+                showStatus('saveStatus', 'success', 'Draw deleted');
+                await renderAdminDrawList();
+                resetForm();
+            } catch (err) {
+                showStatus('saveStatus', 'error', `Delete failed: ${err.message}`);
+            }
         };
 
         $('clearForm').onclick = () => resetForm();
@@ -679,7 +690,7 @@
         $('fetchAllResults').onclick = async () => {
             showStatus('fetchResultsStatus', 'loading', 'Fetching results...');
             try {
-                const res = await fetch('/api/fetch-results', { method: 'POST' });
+                const res = await fetch(`${API}/fetch-results`, { method: 'POST' });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || 'Failed');
                 showStatus('fetchResultsStatus', 'success', data.message);

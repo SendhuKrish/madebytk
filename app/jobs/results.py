@@ -17,6 +17,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.services.db import get_draw_by_date, upsert_draw
+from app.utils.config import settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,20 +26,16 @@ logging.basicConfig(
 logger = logging.getLogger("cron-results")
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": settings.scraper_user_agent,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
-TIMEOUT = 20.0
+TIMEOUT = float(settings.scraper_timeout)
 
 
 async def fetch_from_singapore_pools() -> dict | None:
     """Try fetching latest results from Singapore Pools website."""
-    url = "https://www.singaporepools.com.sg/en/product/sr/Pages/toto_results.aspx"
+    url = settings.singapore_pools_url
     try:
         async with httpx.AsyncClient(
             timeout=TIMEOUT, follow_redirects=True

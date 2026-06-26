@@ -39,7 +39,7 @@ from app.models import (
     RuleResult,
 )
 from app.services.scraper import fetch_latest_draw
-from app.services.db import fetch_all_draws, fetch_draws_without_results, upsert_draw, get_draw_by_date
+from app.services.db import fetch_all_draws, fetch_draws_without_results, upsert_draw, get_draw_by_date, delete_draw_by_id, sign_in_user
 
 logging.basicConfig(
     level=logging.INFO,
@@ -384,8 +384,8 @@ async def extract_bets(image: UploadFile = File(...)):
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
+            model=settings.claude_model,
+            max_tokens=settings.claude_max_tokens,
             messages=[{
                 "role": "user",
                 "content": [
@@ -408,6 +408,42 @@ async def extract_bets(image: UploadFile = File(...)):
         raise HTTPException(502, f"Claude API error: {e.message}")
     except json.JSONDecodeError:
         raise HTTPException(422, "Could not parse JSON from Claude response")
+
+
+# ── Auth endpoints ─────────────────────────────────────────────────
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/auth/login")
+async def login(req: LoginRequest):
+    """Authenticate via Supabase and return access token."""
+    try:
+        return sign_in_user(req.email, req.password)
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+
+
+# ── Draw CRUD endpoints ───────────────────────────────────────────
+
+
+@app.post("/draws")
+async def save_draw(draw: dict):
+    """Create or update a draw record."""
+    result = upsert_draw(draw)
+    return result
+
+
+@app.delete("/draws/{draw_id}")
+async def remove_draw(draw_id: str):
+    """Delete a draw by ID."""
+    ok = delete_draw_by_id(draw_id)
+    if not ok:
+        raise HTTPException(404, "Draw not found")
+    return {"message": "Deleted"}
 
 
 @app.post("/fetch-results")

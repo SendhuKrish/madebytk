@@ -49,6 +49,12 @@ def fetch_draws_without_results() -> list[dict]:
     ]
 
 
+def delete_draw_by_id(draw_id: str) -> bool:
+    """Delete a draw by id."""
+    resp = get_client().table("draws").delete().eq("id", draw_id).execute()
+    return bool(resp.data)
+
+
 def get_draw_by_date(draw_date: str) -> dict | None:
     """Get a draw by draw_date (YYYY-MM-DD)."""
     resp = (
@@ -59,3 +65,16 @@ def get_draw_by_date(draw_date: str) -> dict | None:
         .execute()
     )
     return resp.data[0] if resp.data else None
+
+
+def sign_in_user(email: str, password: str) -> dict:
+    """Sign in a user via Supabase Auth. Returns session data or raises."""
+    from gotrue.errors import AuthApiError
+    try:
+        resp = get_client().auth.sign_in_with_password({"email": email, "password": password})
+        return {
+            "access_token": resp.session.access_token,
+            "user": {"id": str(resp.user.id), "email": resp.user.email},
+        }
+    except AuthApiError as e:
+        raise ValueError(str(e))
