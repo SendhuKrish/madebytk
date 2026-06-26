@@ -21,8 +21,8 @@ uvicorn app.main:app --reload --port 8100
 python -m app.jobs.predict
 python -m app.jobs.results
 
-# Deploy to Azure VM
-cd ~/toto && git pull && docker compose build && docker compose up -d
+# Deploy to Azure VM (nice = low priority so Pally isn't affected)
+cd ~/toto && git pull && nice -n 19 docker compose build && docker compose up -d
 ```
 
 ## Architecture

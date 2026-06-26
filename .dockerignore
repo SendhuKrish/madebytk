@@ -1,0 +1,11 @@
+.git
+.env*
+__pycache__
+*.pyc
+venv
+website
+docs
+_unused
+*.md
+.gitignore
+nginx.conf
