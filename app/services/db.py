@@ -23,8 +23,13 @@ def fetch_all_draws() -> list[dict]:
 
 
 def upsert_draw(draw: dict) -> dict:
-    """Insert or update a draw record."""
-    resp = get_client().table("draws").upsert(draw).execute()
+    """Insert or update a draw record (keyed on draw_date)."""
+    resp = (
+        get_client()
+        .table("draws")
+        .upsert(draw, on_conflict="draw_date")
+        .execute()
+    )
     return resp.data[0] if resp.data else {}
 
 

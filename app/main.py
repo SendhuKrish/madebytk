@@ -30,7 +30,7 @@ from app.services.engine import (
     score_filter,
     score_position,
 )
-from app.models import (
+from app.utils.models import (
     HealthResponse,
     PickLine,
     PostMortemLine,

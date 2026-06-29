@@ -630,7 +630,12 @@
             const drawDate = extractedData ? extractedData.draw_date : null;
             const drawNumber = extractedData ? extractedData.draw_number : null;
             if (!drawDate) { showStatus('saveStatus', 'error', 'Could not determine draw date from the image.'); return; }
-            const draw = { draw_date: drawDate, draw_number: drawNumber || '', predictions: [], bets, results: { winning: [], additional: null } };
+            // Merge into existing draw row if one exists for this date
+            const allDraws = await fetchDraws();
+            const existing = allDraws.find(d => d.draw_date === drawDate);
+            const draw = existing
+                ? { ...existing, bets, draw_number: drawNumber || existing.draw_number || '' }
+                : { draw_date: drawDate, draw_number: drawNumber || '', predictions: [], bets, results: { winning: [], additional: null } };
             if (editingDrawId) draw.id = editingDrawId;
             try {
                 await saveDraw(draw);

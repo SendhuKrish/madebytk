@@ -15,6 +15,9 @@ CREATE TABLE draws (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Each draw date must be unique (prevents duplicate rows)
+ALTER TABLE draws ADD CONSTRAINT draws_draw_date_unique UNIQUE (draw_date);
+
 -- Index for fast date sorting
 CREATE INDEX idx_draws_date ON draws(draw_date DESC);
 
