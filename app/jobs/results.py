@@ -166,11 +166,8 @@ async def fetch_from_lottery_extreme() -> dict | None:
     return None
 
 
-async def main():
-    today = date.today().isoformat()
-    logger.info(f"Running results cron for {today}")
-
-    # Try sources in order of preference
+async def _fetch_results() -> dict | None:
+    """Try all sources in order. Returns result dict or None."""
     result = await fetch_from_singapore_pools()
 
     if not result:
@@ -181,13 +178,11 @@ async def main():
         logger.warning("Lottolyzer failed, trying lottery extreme...")
         result = await fetch_from_lottery_extreme()
 
-    if not result:
-        logger.error("All sources failed. Could not fetch results.")
-        sys.exit(1)
+    return result
 
-    logger.info(f"Results: {result['winning']} +{result['additional']}")
 
-    # Find or create the draw record for today
+def _save_results(today: str, result: dict) -> None:
+    """Save results into the draw record for today."""
     existing = get_draw_by_date(today)
 
     if existing:
@@ -212,6 +207,58 @@ async def main():
         }
         upsert_draw(draw_record)
         logger.info(f"Created new draw record with results for {today}")
+
+
+async def _generate_next_predictions(result: dict) -> None:
+    """After results are in, immediately generate predictions for the next draw."""
+    from app.jobs.predict import main as predict_main
+    logger.info(
+        "Results saved — generating predictions for next draw using "
+        f"winning numbers {result['winning']}"
+    )
+    await predict_main()
+
+
+async def main():
+    """Fetch results with retry. On success, auto-generate next predictions."""
+    from datetime import datetime
+    import pytz
+
+    today = date.today().isoformat()
+    tz = pytz.timezone(settings.tz)
+    retry_until = settings.results_retry_until_hour
+    retry_interval = settings.results_retry_interval_min
+
+    logger.info(
+        f"Running results cron for {today} "
+        f"(retry until {retry_until}:00, every {retry_interval}min)"
+    )
+
+    result = await _fetch_results()
+
+    # Retry loop: sleep and retry until results appear or deadline passes
+    while not result:
+        now = datetime.now(tz)
+        if now.hour >= retry_until:
+            logger.error(
+                f"All sources failed and past retry deadline ({retry_until}:00). Giving up."
+            )
+            sys.exit(1)
+
+        logger.warning(
+            f"No results yet. Retrying in {retry_interval} minutes "
+            f"(until {retry_until}:00 {settings.tz})..."
+        )
+        await asyncio.sleep(retry_interval * 60)
+        result = await _fetch_results()
+
+    logger.info(f"Results: {result['winning']} +{result['additional']}")
+
+    # Save results
+    _save_results(today, result)
+
+    # Immediately generate predictions for the next draw
+    await _generate_next_predictions(result)
 
     logger.info("Results cron complete")
 

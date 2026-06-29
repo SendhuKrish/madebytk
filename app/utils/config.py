@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     predict_minute: int
     results_hour:   int
     results_minute: int
+    results_retry_until_hour: int = 22
+    results_retry_interval_min: int = 60
     predict_days:   str
     results_days:   str
 

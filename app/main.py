@@ -92,14 +92,15 @@ async def lifespan(app: FastAPI):
             timezone=SGT,
         ),
         id="results",
-        name="Fetch draw results",
+        name="Fetch draw results (retries until success or deadline)",
     )
     scheduler.start()
     logger.info(
         f"Scheduler started — predict {settings.predict_days} "
         f"{settings.predict_hour:02d}:{settings.predict_minute:02d}, "
         f"results {settings.results_days} "
-        f"{settings.results_hour:02d}:{settings.results_minute:02d} ({settings.tz})"
+        f"{settings.results_hour:02d}:{settings.results_minute:02d} "
+        f"(retry until {settings.results_retry_until_hour:02d}:00) ({settings.tz})"
     )
 
     yield
