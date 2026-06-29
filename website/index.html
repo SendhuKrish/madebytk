@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Toto Tracker — MadeByTK</title>
+    <title>Toto Prediction — MadeByTK</title>
     <meta name="description" content="Track Singapore Toto predictions, bets placed, and draw results with smart match highlighting.">
     <link rel="canonical" href="https://madebytk.com/">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -244,7 +244,7 @@
 <body>
     <div class="header">
         <div class="header-left">
-            <h1>Toto Tracker</h1>
+            <h1>Toto Prediction</h1>
             <div class="legend">
                 <span class="legend-item"><span class="legend-dot match"></span> Match</span>
                 <span class="legend-item"><span class="legend-dot bonus"></span> Bonus</span>
@@ -413,16 +413,25 @@
                 const hasBets = draw.bets && draw.bets.length > 0;
                 const hasPreds = draw.predictions && draw.predictions.length > 0;
 
-                let bestMatch = 0;
+                let bestBetMatch = 0;
+                let bestPredMatch = 0;
                 if (hasResults && hasBets) {
                     draw.bets.forEach(bet => {
                         const { mainMatch } = countMatches(bet.numbers, draw.results.winning, draw.results.additional);
-                        if (mainMatch > bestMatch) bestMatch = mainMatch;
+                        if (mainMatch > bestBetMatch) bestBetMatch = mainMatch;
+                    });
+                }
+                if (hasResults && hasPreds) {
+                    draw.predictions.forEach(pred => {
+                        const nums = Array.isArray(pred) ? pred : (pred.numbers || []);
+                        const { mainMatch } = countMatches(nums, draw.results.winning, draw.results.additional);
+                        if (mainMatch > bestPredMatch) bestPredMatch = mainMatch;
                     });
                 }
 
                 const statsText = `${(draw.bets||[]).length}b`;
-                const matchColor = bestMatch >= 3 ? 'green' : bestMatch > 0 ? 'amber' : 'gray';
+                const betMatchColor = bestBetMatch >= 3 ? 'green' : bestBetMatch > 0 ? 'amber' : 'gray';
+                const predMatchColor = bestPredMatch >= 3 ? 'green' : bestPredMatch > 0 ? 'amber' : 'gray';
 
                 return `<div class="draw-card ${i === 0 ? 'open' : ''}" data-idx="${i}">
                     <div class="draw-header" onclick="this.parentElement.classList.toggle('open')">
@@ -438,7 +447,8 @@
                         </div>
                         <div class="draw-right">
                             <span class="draw-stats-text">${hasBets ? statsText : ''}</span>
-                            ${hasResults && hasBets ? `<span class="match-count ${matchColor}">${bestMatch}</span>` : ''}
+                            ${hasResults && hasPreds ? `<span class="match-count ${predMatchColor}" title="Best prediction match">P${bestPredMatch}</span>` : ''}
+                            ${hasResults && hasBets ? `<span class="match-count ${betMatchColor}" title="Best bet match">B${bestBetMatch}</span>` : ''}
                             <span class="chevron">▾</span>
                         </div>
                     </div>
