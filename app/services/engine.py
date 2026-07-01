@@ -317,14 +317,71 @@ def generate_low_skew(
     return lines
 
 
+def generate_synthesis(
+    last_draw: list[int],
+    all_lines: list[ScoredPick],
+) -> list[ScoredPick]:
+    """Generate a synthesis line from the collective wisdom of all other lines.
+
+    Counts how often each number appears across lines, scores by frequency +
+    position confidence, then brute-forces the best 6-number combo that
+    passes the filter rules.
+    """
+    from collections import Counter as _Counter
+
+    # Count number frequency across all lines
+    num_freq = _Counter()
+    for line in all_lines:
+        for n in line.pick:
+            num_freq[n] += 1
+
+    # Score each number: frequency weight + position score at best position
+    num_scores = {}
+    for n in range(1, 50):
+        freq = num_freq.get(n, 0)
+        freq_score = freq * 4  # strong weight for consensus
+
+        # Find best position score
+        best_pos_sc = 0
+        for pos in range(6):
+            lo, hi = POS_RANGES[pos]
+            if lo <= n <= hi:
+                sc, _ = score_position(n, pos, last_draw)
+                best_pos_sc = max(best_pos_sc, sc)
+
+        num_scores[n] = freq_score + best_pos_sc
+
+    # Take top 18 candidates (enough for combinatorial search)
+    top_nums = sorted(num_scores.keys(), key=lambda x: -num_scores[x])[:18]
+
+    # Brute-force all 6-combos from top candidates
+    from itertools import combinations as _combinations
+
+    best = []
+    for combo in _combinations(top_nums, 6):
+        pick = sorted(combo)
+        result = score_filter(pick, last_draw)
+        if result.filter_score < MIN_FILTER_SCORE - 2:
+            continue
+
+        # Synthesis score = filter + sum of individual num_scores
+        synth_score = result.filter_score + sum(num_scores[n] for n in pick)
+        result.position_score = sum(num_scores[n] for n in pick)
+        result.total_score = synth_score
+        best.append(result)
+
+    best.sort(key=lambda x: -x.total_score)
+    return best[:1]
+
+
 def generate_all(
     last_draw: list[int],
     seed: int | None = None,
-) -> tuple[list[ScoredPick], list[ScoredPick], list[ScoredPick], int]:
-    """Generate concentrated + diverse + low-skew lines.
+) -> tuple[list[ScoredPick], list[ScoredPick], list[ScoredPick], list[ScoredPick], int]:
+    """Generate concentrated + diverse + low-skew + synthesis lines.
 
     Returns:
-        (concentrated, diverse, low_skew, total_candidates_passed)
+        (concentrated, diverse, low_skew, synthesis, total_candidates_passed)
     """
     concentrated = generate_concentrated(last_draw)
     conc_best = concentrated[:1]
@@ -342,7 +399,11 @@ def generate_all(
         last_draw, n_lines=1, exclude=used, seed=(seed or 0) + 1,
     )
 
-    return conc_best, diverse, low_skew, total_passed
+    # Synthesis: combine wisdom of all 5 lines into one
+    all_lines = list(conc_best) + list(diverse) + list(low_skew)
+    synthesis = generate_synthesis(last_draw, all_lines)
+
+    return conc_best, diverse, low_skew, synthesis, total_passed
 
 
 def run_postmortem(

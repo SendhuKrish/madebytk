@@ -182,7 +182,7 @@ def _build_pick_line(
         line_number=line_num,
         numbers=pick,
         score=result.filter_score,
-        total_score=result.total_score if strategy == "concentrated" else None,
+        total_score=result.total_score if strategy in ("concentrated", "synthesis") else None,
         sum_total=result.sum_total,
         odd_count=result.odd_count,
         even_count=6 - result.odd_count,
@@ -267,7 +267,7 @@ def _generate_predictions(
     """Core prediction logic."""
     logger.info(f"Generating predictions for last_draw={last_draw}")
 
-    concentrated, diverse, low_skew, total_passed = generate_all(
+    concentrated, diverse, low_skew, synthesis, total_passed = generate_all(
         last_draw, seed=seed,
     )
 
@@ -284,6 +284,10 @@ def _generate_predictions(
 
     for r in low_skew:
         lines.append(_build_pick_line(r, line_num, "low_skew", last_draw))
+        line_num += 1
+
+    for r in synthesis:
+        lines.append(_build_pick_line(r, line_num, "synthesis", last_draw))
         line_num += 1
 
     all_nums = set()

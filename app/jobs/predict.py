@@ -71,7 +71,7 @@ async def main():
     logger.info(f"Predictions target draw date: {target_date_str}")
 
     # 3. Generate predictions
-    concentrated, diverse, low_skew, total_passed = generate_all(last_draw)
+    concentrated, diverse, low_skew, synthesis, total_passed = generate_all(last_draw)
 
     predictions = []
     for r in concentrated:
@@ -79,6 +79,8 @@ async def main():
     for r in diverse:
         predictions.append(r.pick)
     for r in low_skew:
+        predictions.append(r.pick)
+    for r in synthesis:
         predictions.append(r.pick)
 
     logger.info(f"Generated {len(predictions)} prediction lines")
