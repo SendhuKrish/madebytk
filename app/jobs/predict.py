@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 from app.services.engine import generate_all
 from app.services.scraper import fetch_latest_draw
-from app.services.db import get_draw_by_date, upsert_draw
+from app.services.db import fetch_draws_without_results, get_draw_by_date, upsert_draw
 from app.utils.config import settings
 
 logging.basicConfig(
@@ -69,6 +69,21 @@ async def main():
     target_date = _next_draw_date(last_draw_date)
     target_date_str = target_date.isoformat()
     logger.info(f"Predictions target draw date: {target_date_str}")
+
+    # Guard: don't skip ahead if an earlier draw still has no results.
+    # e.g. if 02-Jul predictions exist but results aren't in yet,
+    # don't create predictions for 06-Jul.
+    pending = [
+        d for d in fetch_draws_without_results()
+        if d.get("predictions") and len(d["predictions"]) > 0
+        and d["draw_date"] < target_date_str
+    ]
+    if pending:
+        logger.info(
+            f"Draw {pending[0]['draw_date']} still awaiting results — "
+            f"skipping prediction for {target_date_str}"
+        )
+        return
 
     # 3. Generate predictions
     concentrated, diverse, low_skew, synthesis, total_passed = generate_all(last_draw)
