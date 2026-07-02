@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
-"""Cron job: Fetch actual draw results from Singapore Pools and store in Supabase.
+"""Cron job: Fetch actual draw results and store in Supabase.
 
-Schedule: Mon & Thu at 22:00 SGT (after the 6:30 PM draw + result publication).
-Crontab:  0 14 * * 1,4 cd /home/azureuser/toto && /home/azureuser/toto/venv/bin/python -m app.jobs.results
-
-Falls back to third-party sites if Singapore Pools scraping fails.
+Schedule: Mon & Thu at 19:00 SGT (after the 6:30 PM draw).
+Retries hourly until results appear or deadline hour is reached.
+After results are saved, auto-generates predictions for the next draw.
 """
 
 import asyncio
 import logging
 import re
 import sys
-from datetime import date
+from datetime import date, datetime
 
 import httpx
+import pytz
 from bs4 import BeautifulSoup
 
 from app.services.db import get_draw_by_date, upsert_draw
+from app.services.scraper import _try_lottolyzer, _try_lottery_extreme
 from app.utils.config import settings
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("cron-results")
 
 HEADERS = {
@@ -35,12 +33,9 @@ TIMEOUT = float(settings.scraper_timeout)
 
 async def fetch_from_singapore_pools() -> dict | None:
     """Try fetching latest results from Singapore Pools website."""
-    url = settings.singapore_pools_url
     try:
-        async with httpx.AsyncClient(
-            timeout=TIMEOUT, follow_redirects=True
-        ) as client:
-            resp = await client.get(url, headers=HEADERS)
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+            resp = await client.get(settings.singapore_pools_url, headers=HEADERS)
             resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -55,7 +50,6 @@ async def fetch_from_singapore_pools() -> dict | None:
                 text, re.IGNORECASE,
             )
             if date_match:
-                from datetime import datetime
                 draw_date = datetime.strptime(
                     f"{date_match.group(1)} {date_match.group(2)} {date_match.group(3)}",
                     "%d %b %Y",
@@ -72,12 +66,8 @@ async def fetch_from_singapore_pools() -> dict | None:
         # Extract winning numbers
         numbers = []
         for selector in [
-            ".winningNums .ball",
-            ".winning-numbers .ball",
-            ".drawNumber-ball",
-            "table.tableWinNum td",
-            ".winNum",
-            ".toto-winning-number",
+            ".winningNums .ball", ".winning-numbers .ball", ".drawNumber-ball",
+            "table.tableWinNum td", ".winNum", ".toto-winning-number",
         ]:
             balls = soup.select(selector)
             for b in balls:
@@ -106,9 +96,7 @@ async def fetch_from_singapore_pools() -> dict | None:
 
         # Extract additional number
         additional = None
-        add_el = soup.select_one(
-            ".additionalNum .ball, .additional-number, #additionalNum"
-        )
+        add_el = soup.select_one(".additionalNum .ball, .additional-number, #additionalNum")
         if add_el:
             text = add_el.get_text(strip=True)
             if text.isdigit():
@@ -119,15 +107,10 @@ async def fetch_from_singapore_pools() -> dict | None:
             if additional is None and len(numbers) >= 7:
                 additional = numbers[6]
 
-            logger.info(
-                f"Singapore Pools: {winning} +{additional} "
-                f"draw={draw_number} date={draw_date}"
-            )
+            logger.info(f"Singapore Pools: {winning} +{additional} draw={draw_number} date={draw_date}")
             return {
-                "winning": winning,
-                "additional": additional,
-                "draw_number": draw_number,
-                "draw_date": draw_date,
+                "winning": winning, "additional": additional,
+                "draw_number": draw_number, "draw_date": draw_date,
             }
 
     except Exception:
@@ -138,8 +121,6 @@ async def fetch_from_singapore_pools() -> dict | None:
 
 async def fetch_from_lottolyzer() -> dict | None:
     """Fallback: fetch from lottolyzer.com."""
-    from app.services.scraper import _try_lottolyzer
-
     result = await _try_lottolyzer()
     if result:
         return {
@@ -153,21 +134,18 @@ async def fetch_from_lottolyzer() -> dict | None:
 
 async def fetch_from_lottery_extreme() -> dict | None:
     """Fallback: fetch from lotteryextreme.com."""
-    from app.services.scraper import _try_lottery_extreme
-
     result = await _try_lottery_extreme()
     if result:
         return {
             "winning": result["numbers"],
             "additional": result.get("bonus"),
-            "draw_number": None,
-            "draw_date": None,
+            "draw_number": None, "draw_date": None,
         }
     return None
 
 
 async def _fetch_results() -> dict | None:
-    """Try all sources in order. Returns result dict or None."""
+    """Try all sources in order."""
     result = await fetch_from_singapore_pools()
 
     if not result:
@@ -186,80 +164,53 @@ def _save_results(today: str, result: dict) -> None:
     existing = get_draw_by_date(today)
 
     if existing:
-        existing["results"] = {
-            "winning": result["winning"],
-            "additional": result["additional"],
-        }
+        existing["results"] = {"winning": result["winning"], "additional": result["additional"]}
         if result.get("draw_number") and not existing.get("draw_number"):
             existing["draw_number"] = result["draw_number"]
         upsert_draw(existing)
         logger.info(f"Updated results on existing draw for {today}")
     else:
-        draw_record = {
+        upsert_draw({
             "draw_date": today,
             "draw_number": result.get("draw_number") or "",
             "predictions": [],
             "bets": [],
-            "results": {
-                "winning": result["winning"],
-                "additional": result["additional"],
-            },
-        }
-        upsert_draw(draw_record)
+            "results": {"winning": result["winning"], "additional": result["additional"]},
+        })
         logger.info(f"Created new draw record with results for {today}")
 
 
 async def _generate_next_predictions(result: dict) -> None:
     """After results are in, immediately generate predictions for the next draw."""
     from app.jobs.predict import main as predict_main
-    logger.info(
-        "Results saved — generating predictions for next draw using "
-        f"winning numbers {result['winning']}"
-    )
+    logger.info(f"Results saved — generating predictions for next draw using winning numbers {result['winning']}")
     await predict_main()
 
 
 async def main():
     """Fetch results with retry. On success, auto-generate next predictions."""
-    from datetime import datetime
-    import pytz
-
     today = date.today().isoformat()
     tz = pytz.timezone(settings.tz)
     retry_until = settings.results_retry_until_hour
     retry_interval = settings.results_retry_interval_min
 
-    logger.info(
-        f"Running results cron for {today} "
-        f"(retry until {retry_until}:00, every {retry_interval}min)"
-    )
+    logger.info(f"Running results cron for {today} (retry until {retry_until}:00, every {retry_interval}min)")
 
     result = await _fetch_results()
 
-    # Retry loop: sleep and retry until results appear or deadline passes
     while not result:
         now = datetime.now(tz)
         if now.hour >= retry_until:
-            logger.error(
-                f"All sources failed and past retry deadline ({retry_until}:00). Giving up."
-            )
+            logger.error(f"All sources failed and past retry deadline ({retry_until}:00). Giving up.")
             sys.exit(1)
 
-        logger.warning(
-            f"No results yet. Retrying in {retry_interval} minutes "
-            f"(until {retry_until}:00 {settings.tz})..."
-        )
+        logger.warning(f"No results yet. Retrying in {retry_interval} minutes (until {retry_until}:00 {settings.tz})...")
         await asyncio.sleep(retry_interval * 60)
         result = await _fetch_results()
 
     logger.info(f"Results: {result['winning']} +{result['additional']}")
-
-    # Save results
     _save_results(today, result)
-
-    # Immediately generate predictions for the next draw
     await _generate_next_predictions(result)
-
     logger.info("Results cron complete")
 
 

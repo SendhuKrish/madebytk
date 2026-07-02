@@ -2,7 +2,7 @@
 """Cron job: Generate predictions for the next draw and store in Supabase.
 
 Schedule: Mon & Thu at 08:00 SGT (before the 6:30 PM draw).
-Crontab:  0 0 * * 1,4 cd /home/azureuser/toto && /home/azureuser/toto/venv/bin/python -m app.jobs.predict
+Also triggered automatically after results are fetched.
 """
 
 import asyncio
@@ -73,15 +73,7 @@ async def main():
     # 3. Generate predictions
     concentrated, diverse, low_skew, synthesis, total_passed = generate_all(last_draw)
 
-    predictions = []
-    for r in concentrated:
-        predictions.append(r.pick)
-    for r in diverse:
-        predictions.append(r.pick)
-    for r in low_skew:
-        predictions.append(r.pick)
-    for r in synthesis:
-        predictions.append(r.pick)
+    predictions = [r.pick for group in (concentrated, diverse, low_skew, synthesis) for r in group]
 
     logger.info(f"Generated {len(predictions)} prediction lines")
 

@@ -88,5 +88,5 @@ class HealthResponse(BaseModel):
     """Health check response."""
     status: str = "ok"
     service: str = "toto-engine"
-    version: str = "3.0"
+    version: str = "4.0.0"
     uptime_seconds: float

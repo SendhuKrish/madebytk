@@ -2,6 +2,7 @@
 
 import logging
 import re
+from datetime import datetime
 
 import httpx
 from bs4 import BeautifulSoup
@@ -57,8 +58,6 @@ async def _try_lottolyzer() -> dict | None:
                     if 1 <= val <= 49 and val not in numbers:
                         numbers.append(val)
                         break
-                if numbers and numbers[-1] == (int(re.findall(r"\d+", b.get("alt", "") or b.get("src", ""))[0]) if re.findall(r"\d+", b.get("alt", "") or b.get("src", "")) else -1):
-                    break
 
         if len(numbers) >= 6:
             main = sorted(numbers[:6])
@@ -182,8 +181,6 @@ async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
             winning = sorted(balls[:6])
             additional = balls[6]
 
-            # Parse date
-            from datetime import datetime
             try:
                 draw_date = datetime.strptime(date_str.strip(), "%d %b %Y").strftime("%Y-%m-%d")
             except ValueError:

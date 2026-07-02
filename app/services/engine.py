@@ -3,6 +3,7 @@
 import random
 from collections import Counter
 from dataclasses import dataclass, field
+from itertools import combinations
 
 POOL = list(range(1, 50))
 CANDIDATE_COUNT = 500_000
@@ -75,7 +76,7 @@ def score_filter(pick: list[int], prev: list[int]) -> ScoredPick:
         else:
             fails.append(name)
 
-    # Tier 1 (×3)
+    # Tier 1 (x3)
     add("Spread>=20", spread >= 20, 3)
     add("Sum80-220", 80 <= sm <= 220, 3)
     add("3+ranges", len(ranges) >= 3, 3)
@@ -83,19 +84,19 @@ def score_filter(pick: list[int], prev: list[int]) -> ScoredPick:
     add("P1<=14", s[0] <= 14, 3)
     add("P6>=33", s[5] >= 33, 3)
 
-    # Tier 2 (×2)
+    # Tier 2 (x2)
     add("4+rows", len(rows) >= 4, 2)
     add("RepUnits", any(v >= 2 for v in units.values()), 2)
     add("Balance", 2 <= low <= 4, 2)
     add("Odd2-4", 2 <= odds <= 4, 2)
     add("Anchor", any(n <= 10 for n in s) and any(n >= 35 for n in s), 2)
 
-    # Tier 3 (×1)
+    # Tier 3 (x1)
     add("7apart", any(n + 7 in ss for n in s), 1)
     add("Consec", any(g == 1 for g in gaps), 1)
     add("Complement", any(50 - n in ss and 50 - n != n for n in s), 1)
 
-    # Inter-draw (×2)
+    # Inter-draw (x2)
     add("2+nb3", nb3 >= 2, 2)
     add("3+nb3", nb3 >= 3, 2)
     prev_z = set(
@@ -130,18 +131,14 @@ def score_position(n: int, pos: int, last_draw: list[int]) -> tuple[int, list[st
     reasons = []
     prev_at_pos = sorted(last_draw)[pos]
     avg_at_pos = POS_AVERAGES[pos]
-    deviation = prev_at_pos - avg_at_pos  # positive = prev was high, negative = low
+    deviation = prev_at_pos - avg_at_pos
     dev_magnitude = abs(deviation)
     is_extreme = dev_magnitude > REVERSION_THRESHOLD
     is_middle = pos in REVERSION_POSITIONS
 
-    # ── Proximity to previous draw ──
-    # Full weight for anchors (P1, P6); reduced for middle positions when extreme
+    # Proximity to previous draw
     shift = abs(n - prev_at_pos)
-    prox_weight = 1.0
-    if is_middle and is_extreme:
-        # Dampen proximity reward — the draw is likely to move away
-        prox_weight = 0.5
+    prox_weight = 0.5 if (is_middle and is_extreme) else 1.0
 
     if shift <= 1:
         prox_pts = int(5 * prox_weight)
@@ -155,26 +152,22 @@ def score_position(n: int, pos: int, last_draw: list[int]) -> tuple[int, list[st
         sc += 1
         reasons.append(f"±5 from P{pos + 1}")
 
-    # ── Mean reversion (P2-P5 only, when previous was extreme) ──
+    # Mean reversion (P2-P5 only, when previous was extreme)
     if is_middle and is_extreme:
         dist_n_to_avg = abs(n - avg_at_pos)
-        dist_prev_to_avg = dev_magnitude
 
-        # How much closer to avg is this candidate vs prev?
-        reversion_frac = 1.0 - (dist_n_to_avg / dist_prev_to_avg) if dist_prev_to_avg > 0 else 0
+        reversion_frac = 1.0 - (dist_n_to_avg / dev_magnitude) if dev_magnitude > 0 else 0
 
         if reversion_frac > 0:
-            # Scale bonus: larger deviation = stronger pull (max +6)
             bonus = min(6, int(reversion_frac * dev_magnitude * 0.8))
             if bonus > 0:
                 sc += bonus
                 reasons.append(f"revert→avg({avg_at_pos:.0f}) +{bonus}")
         elif dist_n_to_avg <= 3:
-            # Even if not "between," reward being near the average
             sc += 2
             reasons.append(f"near avg({avg_at_pos:.0f})")
 
-    # ── Neighborhood echo (near ANY number in last draw) ──
+    # Neighborhood echo (near ANY number in last draw)
     for p in last_draw:
         if 0 < abs(n - p) <= 2:
             sc += 3
@@ -185,12 +178,12 @@ def score_position(n: int, pos: int, last_draw: list[int]) -> tuple[int, list[st
             reasons.append(f"±3 of {p}")
             break
 
-    # ── Repeat from last draw ──
+    # Repeat from last draw
     if n in last_draw:
         sc += 2
         reasons.append("repeat")
 
-    # ── Complement potential ──
+    # Complement potential
     comp = 50 - n
     if 1 <= comp <= 49 and comp != n:
         for pp, (lo, hi) in enumerate(POS_RANGES):
@@ -199,7 +192,7 @@ def score_position(n: int, pos: int, last_draw: list[int]) -> tuple[int, list[st
                 reasons.append(f"comp={comp}")
                 break
 
-    # ── Hot number bonus ──
+    # Hot number bonus
     if n in HOT_NUMBERS:
         sc += 1
         reasons.append("hot")
@@ -291,7 +284,7 @@ def generate_low_skew(
     exclude: set[int] | None = None,
     seed: int | None = None,
 ) -> list[ScoredPick]:
-    """Generate low-skew lines (5+ numbers ≤ 25)."""
+    """Generate low-skew lines (5+ numbers <= 25)."""
     if seed is not None:
         random.seed(seed)
 
@@ -327,21 +320,17 @@ def generate_synthesis(
     position confidence, then brute-forces the best 6-number combo that
     passes the filter rules.
     """
-    from collections import Counter as _Counter
-
     # Count number frequency across all lines
-    num_freq = _Counter()
+    num_freq = Counter()
     for line in all_lines:
         for n in line.pick:
             num_freq[n] += 1
 
-    # Score each number: frequency weight + position score at best position
+    # Score each number: frequency weight + best position score
     num_scores = {}
     for n in range(1, 50):
-        freq = num_freq.get(n, 0)
-        freq_score = freq * 4  # strong weight for consensus
+        freq_score = num_freq.get(n, 0) * 4
 
-        # Find best position score
         best_pos_sc = 0
         for pos in range(6):
             lo, hi = POS_RANGES[pos]
@@ -351,20 +340,16 @@ def generate_synthesis(
 
         num_scores[n] = freq_score + best_pos_sc
 
-    # Take top 18 candidates (enough for combinatorial search)
+    # Top 18 candidates for combinatorial search
     top_nums = sorted(num_scores.keys(), key=lambda x: -num_scores[x])[:18]
 
-    # Brute-force all 6-combos from top candidates
-    from itertools import combinations as _combinations
-
     best = []
-    for combo in _combinations(top_nums, 6):
+    for combo in combinations(top_nums, 6):
         pick = sorted(combo)
         result = score_filter(pick, last_draw)
         if result.filter_score < MIN_FILTER_SCORE - 2:
             continue
 
-        # Synthesis score = filter + sum of individual num_scores
         synth_score = result.filter_score + sum(num_scores[n] for n in pick)
         result.position_score = sum(num_scores[n] for n in pick)
         result.total_score = synth_score
@@ -399,7 +384,7 @@ def generate_all(
         last_draw, n_lines=1, exclude=used, seed=(seed or 0) + 1,
     )
 
-    # Synthesis: combine wisdom of all 5 lines into one
+    # Synthesis: combine wisdom of all lines into one
     all_lines = list(conc_best) + list(diverse) + list(low_skew)
     synthesis = generate_synthesis(last_draw, all_lines)
 
@@ -414,7 +399,6 @@ def run_postmortem(
 ) -> dict:
     """Run post-mortem analysis."""
     actual_set = set(actual)
-    actual_bonus = set(actual + ([bonus] if bonus else []))
 
     # Rule check on actual
     result = score_filter(actual, prev_draw)
@@ -469,7 +453,7 @@ def run_postmortem(
     if abs(our_avg_sum - actual_sum) > 40:
         root_cause = f"Sum mismatch: actual {actual_sum} vs our avg {our_avg_sum:.0f}."
     elif low >= 5:
-        root_cause = f"Low-skew draw ({low}/6 numbers ≤ 25). Balance filter excluded this shape."
+        root_cause = f"Low-skew draw ({low}/6 numbers <= 25). Balance filter excluded this shape."
     else:
         root_cause = "Draw fell within expected structural range."
 
