@@ -107,10 +107,42 @@ async def fetch_from_singapore_pools() -> dict | None:
             if additional is None and len(numbers) >= 7:
                 additional = numbers[6]
 
-            logger.info(f"Singapore Pools: {winning} +{additional} draw={draw_number} date={draw_date}")
+            # Extract jackpot and prize breakdown
+            jackpot = None
+            prizes = []
+            jackpot_el = soup.find(string=re.compile(r"Group\s*1\s*Prize", re.IGNORECASE))
+            if jackpot_el:
+                parent = jackpot_el.find_parent()
+                if parent:
+                    amt_match = re.search(r"\$[\d,]+", parent.get_text())
+                    if not amt_match:
+                        nxt = parent.find_next_sibling()
+                        if nxt:
+                            amt_match = re.search(r"\$[\d,]+", nxt.get_text())
+                    if amt_match:
+                        jackpot = int(amt_match.group().replace("$", "").replace(",", ""))
+
+            for table in soup.find_all("table"):
+                header_text = table.get_text().lower()
+                if "prize group" in header_text and "winning shares" in header_text:
+                    rows = table.find_all("tr")[1:]  # skip header
+                    for row in rows:
+                        cells = row.find_all(["td", "th"])
+                        if len(cells) >= 3:
+                            grp_match = re.search(r"(\d)", cells[0].get_text())
+                            amt_text = cells[1].get_text(strip=True)
+                            shares_text = cells[2].get_text(strip=True)
+                            if grp_match:
+                                amt_val = int(amt_text.replace("$", "").replace(",", "")) if re.search(r"\d", amt_text) else 0
+                                shares_val = int(shares_text.replace(",", "")) if re.search(r"\d", shares_text) else 0
+                                prizes.append({"group": int(grp_match.group(1)), "amount": amt_val, "winners": shares_val})
+                    break
+
+            logger.info(f"Singapore Pools: {winning} +{additional} draw={draw_number} date={draw_date} jackpot={jackpot}")
             return {
                 "winning": winning, "additional": additional,
                 "draw_number": draw_number, "draw_date": draw_date,
+                "jackpot": jackpot, "prizes": prizes,
             }
 
     except Exception:
@@ -163,8 +195,15 @@ def _save_results(today: str, result: dict) -> None:
     """Save results into the draw record for today."""
     existing = get_draw_by_date(today)
 
+    results_data = {
+        "winning": result["winning"],
+        "additional": result["additional"],
+        "jackpot": result.get("jackpot"),
+        "prizes": result.get("prizes", []),
+    }
+
     if existing:
-        existing["results"] = {"winning": result["winning"], "additional": result["additional"]}
+        existing["results"] = results_data
         if result.get("draw_number") and not existing.get("draw_number"):
             existing["draw_number"] = result["draw_number"]
         upsert_draw(existing)
@@ -175,7 +214,7 @@ def _save_results(today: str, result: dict) -> None:
             "draw_number": result.get("draw_number") or "",
             "predictions": [],
             "bets": [],
-            "results": {"winning": result["winning"], "additional": result["additional"]},
+            "results": results_data,
         })
         logger.info(f"Created new draw record with results for {today}")
 

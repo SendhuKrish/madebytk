@@ -156,6 +156,32 @@
         .no-data { color: var(--text-muted); font-size: .8rem; font-style: italic; padding: .5rem 0; }
         .empty-state { text-align: center; padding: 4rem 2rem; color: var(--text-muted); }
 
+        /* ── Prize Table ── */
+        .prize-section {
+            border-top: 1px solid var(--border-light);
+            padding: .8rem 0;
+        }
+        .prize-section h4 {
+            font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
+            color: var(--text-muted); font-weight: 700; margin-bottom: .5rem;
+        }
+        .prize-jackpot {
+            font-size: .82rem; font-weight: 700; color: var(--green-dark);
+            margin-bottom: .5rem;
+        }
+        .prize-table {
+            width: 100%; max-width: 420px; border-collapse: collapse;
+            font-size: .75rem; font-family: 'JetBrains Mono', monospace;
+        }
+        .prize-table th {
+            text-align: left; padding: .25rem .5rem; color: var(--text-muted);
+            font-weight: 600; border-bottom: 1px solid var(--border);
+        }
+        .prize-table td {
+            padding: .2rem .5rem; color: var(--text-dim);
+        }
+        .prize-table tr:nth-child(even) { background: #fafaf7; }
+
         /* ── Loading ── */
         .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: .5rem; }
         @keyframes spin { to { transform: rotate(360deg); } }
@@ -453,6 +479,7 @@
                         </div>
                     </div>
                     <div class="draw-body">
+                        ${hasResults ? renderPrizeSection(draw) : ''}
                         ${(hasPreds || hasBets) ? `
                         <div class="draw-columns">
                             ${hasPreds ? renderPredCol(draw) : ''}
@@ -461,6 +488,24 @@
                     </div>
                 </div>`;
             }).join('');
+        }
+
+        function renderPrizeSection(draw) {
+            const results = draw.results;
+            if (!results || !results.prizes || results.prizes.length === 0) return '';
+            const jackpot = results.jackpot;
+            return `<div class="prize-section">
+                <h4>Winning Shares</h4>
+                ${jackpot ? `<div class="prize-jackpot">Group 1 Prize: $${jackpot.toLocaleString()}</div>` : ''}
+                <table class="prize-table">
+                    <tr><th>Group</th><th>Share Amount</th><th>Winners</th></tr>
+                    ${results.prizes.map(p => `<tr>
+                        <td>${p.group}</td>
+                        <td>${p.amount > 0 ? '$' + p.amount.toLocaleString() : '—'}</td>
+                        <td>${p.winners > 0 ? p.winners.toLocaleString() : '—'}</td>
+                    </tr>`).join('')}
+                </table>
+            </div>`;
         }
 
         function renderPredCol(draw) {
