@@ -22,7 +22,7 @@ from app.utils.models import (
     HealthResponse, PickLine, PostMortemLine,
     PostMortemResponse, PredictionResponse, RuleResult,
 )
-from app.services.scraper import fetch_latest_draw, fetch_lottolyzer_history
+from app.services.scraper import fetch_latest_draw, fetch_lottolyzer_history, fetch_lottery_extreme_prizes
 from app.services.db import (
     delete_draw_by_id, fetch_all_draws, fetch_draws_without_results,
     get_draw_by_date, sign_in_user, upsert_draw,
@@ -354,7 +354,69 @@ async def fetch_missing_results():
             draw["results"] = {"winning": match["winning"], "additional": match["additional"]}
             if match.get("draw_number") and not draw.get("draw_number"):
                 draw["draw_number"] = match["draw_number"]
+            # Also try to fetch prizes
+            le_data = await fetch_lottery_extreme_prizes(draw["draw_date"])
+            if le_data and le_data.get("prizes"):
+                draw["results"]["prizes"] = le_data["prizes"]
+                draw["results"]["jackpot"] = le_data.get("jackpot")
+            upsert_draw(draw)
+            updated += 1
+            await asyncio.sleep(0.5)
+
+    return {"message": f"Updated {updated} draw(s) with results", "updated": updated}
+
+
+@app.post("/backfill-prizes")
+async def backfill_prizes():
+    """Fetch prize data from Lottery Extreme for all draws missing it.
+
+    Also corrects winning numbers if they differ from Lottery Extreme.
+    """
+    draws = fetch_all_draws()
+    updated = 0
+    failed = 0
+
+    for draw in draws:
+        draw_date = draw.get("draw_date")
+        results = draw.get("results") or {}
+        has_winning = results.get("winning") and len(results.get("winning", [])) > 0
+        has_prizes = results.get("prizes") and len(results.get("prizes", [])) > 0
+
+        if not has_winning or has_prizes:
+            continue
+
+        le_data = await fetch_lottery_extreme_prizes(draw_date)
+        if not le_data:
+            failed += 1
+            continue
+
+        changed = False
+
+        if le_data.get("prizes"):
+            results["prizes"] = le_data["prizes"]
+            results["jackpot"] = le_data.get("jackpot")
+            changed = True
+
+        # Correct winning numbers if they differ
+        if le_data.get("numbers"):
+            le_winning = sorted(le_data["numbers"])
+            current_winning = sorted(results.get("winning", []))
+            if le_winning != current_winning:
+                results["winning"] = le_winning
+                changed = True
+            if le_data.get("bonus") and le_data["bonus"] != results.get("additional"):
+                results["additional"] = le_data["bonus"]
+                changed = True
+
+        if le_data.get("draw_number") and not draw.get("draw_number"):
+            draw["draw_number"] = str(le_data["draw_number"])
+            changed = True
+
+        if changed:
+            draw["results"] = results
             upsert_draw(draw)
             updated += 1
 
-    return {"message": f"Updated {updated} draw(s) with results", "updated": updated}
+        await asyncio.sleep(0.5)
+
+    return {"message": f"Backfilled {updated} draw(s) with prizes ({failed} failed)", "updated": updated, "failed": failed}
