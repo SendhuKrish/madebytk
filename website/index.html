@@ -92,6 +92,13 @@
             font-size: .72rem; color: var(--text-muted);
             font-family: 'JetBrains Mono', monospace;
         }
+        .jackpot-badge {
+            font-size: .7rem; font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            padding: .15rem .5rem; border-radius: 4px;
+        }
+        .jackpot-badge.prize { color: var(--green-dark); background: var(--green-bg); }
+        .jackpot-badge.est { color: #b45309; background: var(--amber-bg); }
         .winning-row { display: flex; align-items: center; gap: .3rem; }
         .ball {
             width: 32px; height: 32px; border-radius: 50%;
@@ -288,6 +295,7 @@
             .winning-row { display: none; }
             .legend { display: none; }
             .draw-date { min-width: auto; }
+            .jackpot-badge { font-size: .65rem; }
         }
     </style>
 </head>
@@ -483,11 +491,22 @@
                 const betMatchColor = bestBetMatch >= 3 ? 'green' : bestBetMatch > 0 ? 'amber' : 'gray';
                 const predMatchColor = bestPredMatch >= 3 ? 'green' : bestPredMatch > 0 ? 'amber' : 'gray';
 
+                // Jackpot badge logic
+                const g1Prize = draw.results && draw.results.group1_prize;
+                const estJackpot = draw.results && draw.results.estimated_jackpot;
+                let jackpotBadge = '';
+                if (hasResults && g1Prize) {
+                    jackpotBadge = `<span class="jackpot-badge prize">Grp1: $${g1Prize.toLocaleString()}</span>`;
+                } else if (!hasResults && estJackpot) {
+                    jackpotBadge = `<span class="jackpot-badge est">$${estJackpot.toLocaleString()} est</span>`;
+                }
+
                 return `<div class="draw-card ${i === 0 ? 'open' : ''}" data-idx="${i}">
                     <div class="draw-header" onclick="this.parentElement.classList.toggle('open')">
                         <div class="draw-left">
                             <span class="draw-date">${formatDate(draw.draw_date)}</span>
                             ${draw.draw_number ? `<span class="draw-num">#${draw.draw_number}</span>` : ''}
+                            ${jackpotBadge}
                             ${hasResults ? `
                                 <div class="winning-row">
                                     ${draw.results.winning.map(n => `<span class="ball win">${pad(n)}</span>`).join('')}

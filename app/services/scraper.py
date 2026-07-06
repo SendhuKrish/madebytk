@@ -375,6 +375,126 @@ def _split_concat_numbers(s: str, count: int) -> list[int] | None:
     return results[0] if results else None
 
 
+async def fetch_sg_pools_results() -> dict | None:
+    """Fetch latest results from Singapore Pools results page.
+
+    The page is server-rendered (SharePoint) and reliably contains:
+    - Winning numbers and additional number
+    - Group 1 Prize total (the prize pool, not per-winner share)
+    - Winning shares (Groups 1-7)
+    - Snowball text when Group 1 has no winner
+
+    Returns:
+        Dict with keys: numbers, bonus, draw_number, date, prizes,
+        group1_prize, snowball_amount.  None on failure.
+    """
+    url = settings.singapore_pools_url
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+            resp = await client.get(url, headers=HEADERS)
+            resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        text = re.sub(r"\s+", " ", soup.get_text()).strip()
+
+        # ── Draw date: "Mon, 06 Jul 2026" ──
+        date_str = None
+        date_match = re.search(
+            r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})",
+            text, re.IGNORECASE,
+        )
+        if date_match:
+            try:
+                date_str = datetime.strptime(
+                    f"{date_match.group(1)} {date_match.group(2)} {date_match.group(3)}",
+                    "%d %b %Y",
+                ).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+
+        # ── Draw number: "Draw No. 4197" ──
+        draw_number = None
+        dn_match = re.search(r"Draw\s+No\.\s*(\d{4})", text)
+        if dn_match:
+            draw_number = int(dn_match.group(1))
+
+        # ── Winning numbers + additional from table cells ──
+        numbers = []
+        additional = None
+        tables = soup.find_all("table")
+        for table in tables:
+            tds = table.find_all("td")
+            vals = []
+            for td in tds:
+                t = td.get_text(strip=True)
+                if re.fullmatch(r"\d{1,2}", t):
+                    val = int(t)
+                    if 1 <= val <= 49:
+                        vals.append(val)
+            # First table with 6 numbers = winning numbers
+            if len(vals) == 6 and not numbers:
+                numbers = sorted(vals)
+            # Next table with exactly 1 number = additional
+            elif len(vals) == 1 and numbers and additional is None:
+                additional = vals[0]
+
+        # ── Group 1 Prize total ──
+        group1_prize = None
+        g1_match = re.search(r"Group\s*1\s*Prize\s*\$\s*([\d,]+)", text)
+        if g1_match:
+            group1_prize = int(g1_match.group(1).replace(",", ""))
+
+        # ── Snowball amount ──
+        snowball_amount = None
+        snow_match = re.search(
+            r"prize\s+amount\s+of\s+\$([\d,]+)\s+will\s+be\s+snowballed",
+            text, re.IGNORECASE,
+        )
+        if snow_match:
+            snowball_amount = int(snow_match.group(1).replace(",", ""))
+
+        # ── Winning shares from prize table ──
+        prizes = []
+        for table in tables:
+            headers = [th.get_text(strip=True) for th in table.find_all("th")]
+            if any("Prize Group" in h for h in headers):
+                for row in table.find_all("tr")[1:]:
+                    cells = [td.get_text(strip=True) for td in row.find_all("td")]
+                    if len(cells) >= 3 and re.match(r"Group\s+\d", cells[0]):
+                        group = int(re.search(r"\d", cells[0]).group())
+                        amt = cells[1].replace("$", "").replace(",", "").strip()
+                        win = cells[2].replace(",", "").strip()
+                        amount = int(amt) if amt.isdigit() else 0
+                        winners = int(win) if win.isdigit() else 0
+                        prizes.append({"group": group, "amount": amount, "winners": winners})
+                break
+
+        if not numbers:
+            logger.warning("Singapore Pools: no winning numbers found")
+            return None
+
+        logger.info(
+            f"Singapore Pools: {numbers} +{additional} draw={draw_number} "
+            f"g1_prize={group1_prize} snowball={snowball_amount} "
+            f"prizes={len(prizes)} groups"
+        )
+        return {
+            "numbers": numbers,
+            "bonus": additional,
+            "draw_number": draw_number,
+            "date": date_str,
+            "prizes": prizes,
+            "group1_prize": group1_prize,
+            "snowball_amount": snowball_amount,
+        }
+
+    except Exception:
+        logger.exception("Singapore Pools fetch failed")
+
+    return None
+
+
 async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
     """Fetch multiple draws from lottolyzer.com history page.
 

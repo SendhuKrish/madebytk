@@ -22,7 +22,7 @@ from app.utils.models import (
     HealthResponse, PickLine, PostMortemLine,
     PostMortemResponse, PredictionResponse, RuleResult,
 )
-from app.services.scraper import fetch_latest_draw, fetch_lottolyzer_history, fetch_lottery_extreme_prizes
+from app.services.scraper import fetch_latest_draw, fetch_lottolyzer_history, fetch_lottery_extreme_prizes, fetch_sg_pools_results
 from app.services.db import (
     delete_draw_by_id, fetch_all_draws, fetch_draws_without_results,
     get_draw_by_date, sign_in_user, upsert_draw,
@@ -420,3 +420,49 @@ async def backfill_prizes():
         await asyncio.sleep(0.5)
 
     return {"message": f"Backfilled {updated} draw(s) with prizes ({failed} failed)", "updated": updated, "failed": failed}
+
+
+@app.post("/backfill-g1prize")
+async def backfill_g1prize():
+    """Fetch Group 1 Prize from Singapore Pools and update the latest draw.
+
+    Also sets estimated_jackpot on the next draw based on snowball status.
+    """
+    from app.jobs.results import _next_draw_date
+
+    sg = await fetch_sg_pools_results()
+    if not sg or not sg.get("numbers"):
+        raise HTTPException(503, "Could not fetch Singapore Pools results")
+
+    draw_date = sg["date"]
+    draw = get_draw_by_date(draw_date)
+    if not draw:
+        return {"message": f"No draw found for {draw_date}", "updated": 0}
+
+    results = draw.get("results") or {}
+    results["group1_prize"] = sg.get("group1_prize")
+    # Also update prizes if we got them from SG Pools
+    if sg.get("prizes") and (not results.get("prizes") or len(results.get("prizes", [])) == 0):
+        results["prizes"] = sg["prizes"]
+    draw["results"] = results
+    upsert_draw(draw)
+
+    # Set estimated jackpot on next draw
+    snowball = sg.get("snowball_amount")
+    next_date = _next_draw_date(draw_date)
+    next_draw = get_draw_by_date(next_date)
+    estimated = snowball if snowball else 1_000_000
+
+    if next_draw:
+        next_results = next_draw.get("results") or {}
+        next_results["estimated_jackpot"] = estimated
+        next_draw["results"] = next_results
+        upsert_draw(next_draw)
+
+    return {
+        "message": f"Updated {draw_date} with group1_prize=${sg.get('group1_prize', 0):,}",
+        "group1_prize": sg.get("group1_prize"),
+        "snowball": snowball,
+        "estimated_next": estimated,
+        "next_draw": next_date,
+    }
