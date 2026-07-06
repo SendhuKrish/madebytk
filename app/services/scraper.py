@@ -201,11 +201,14 @@ async def _try_lottery_extreme() -> dict | None:
 async def fetch_lottery_extreme_prizes(draw_date: str) -> dict | None:
     """Fetch results AND prizes from lottery extreme winners page.
 
+    The page uses deeply nested tables so we parse the raw page text
+    with regex rather than relying on CSS selectors or cell positions.
+
     Args:
         draw_date: ISO date string (YYYY-MM-DD).
 
     Returns:
-        Dict with keys: numbers, bonus, draw_number, date, prizes.
+        Dict with keys: numbers, bonus, draw_number, date, prizes, jackpot.
         None if page not available or parse fails.
     """
     url = f"{settings.lottery_extreme_winners_url}({draw_date})"
@@ -216,7 +219,9 @@ async def fetch_lottery_extreme_prizes(draw_date: str) -> dict | None:
             resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        text = soup.get_text()
+        # Normalize whitespace: get_text() may insert newlines between
+        # table cells, breaking regexes that expect adjacent text.
+        text = re.sub(r"\s+", " ", soup.get_text()).strip()
 
         # ── Extract draw number from "(NNNN)" ──
         draw_number = None
@@ -224,73 +229,46 @@ async def fetch_lottery_extreme_prizes(draw_date: str) -> dict | None:
         if dn_match:
             draw_number = int(dn_match.group(1))
 
-        # ── Extract winning numbers ──
-        numbers = []
-        for selector in [".ball", ".result", ".draw-result", ".number"]:
-            els = soup.select(selector)
-            for el in els:
-                t = el.get_text(strip=True)
-                if t.isdigit():
-                    val = int(t)
-                    if 1 <= val <= 49:
-                        numbers.append(val)
-            if len(numbers) >= 6:
-                break
+        # ── Extract winning numbers from raw text ──
+        # Page renders numbers as concatenated digits followed by space
+        # and additional number, e.g. "82534373946 44" before "Group"
+        winning = None
+        bonus = None
+        nums_match = re.search(
+            r"\(\d{4}\)\s*([\d\s]+?)\s*Group",
+            text,
+        )
+        if nums_match:
+            raw = nums_match.group(1).strip()
+            winning, bonus = _parse_concatenated_numbers(raw)
 
-        # Fallback: leaf elements with 1-2 digit text
-        if len(numbers) < 6:
-            numbers = []
-            for el in soup.find_all(True):
-                t = el.get_text(strip=True)
-                if re.fullmatch(r"\d{1,2}", t) and not el.find_all(True):
-                    val = int(t)
-                    if 1 <= val <= 49:
-                        numbers.append(val)
-                        if len(numbers) >= 7:
-                            break
-
-        winning = sorted(numbers[:6]) if len(numbers) >= 6 else None
-        bonus = numbers[6] if len(numbers) > 6 else None
-
-        # ── Parse prize table ──
+        # ── Parse prizes from raw text via regex ──
+        # Each prize row in the text looks like:
+        #   "16 numbers0$0"  or  "25 numbers + Add no.4$92,756"
+        # Pattern: group_digit, match_digits + "numbers" [+ Add no.],
+        #          winners_digits, $payout
         prizes = []
         jackpot = None
 
-        for table in soup.find_all("table"):
-            header_text = table.get_text().lower()
-            if "group" not in header_text or "winner" not in header_text:
-                continue
+        prize_pattern = re.compile(
+            r"(\d)\s*"                       # group number
+            r"(\d\s+numbers"                 # number of matches + "numbers"
+            r"(?:\s*\+\s*Add\s*no\.?)?)"     # optional "+ Add no."
+            r"\s*(\d[\d,]*)"                 # winners count
+            r"\s*\$([\d,]+?)"                # payout amount (non-greedy)
+            r"(?=\s*\d\s*\d\s+numbers"       # lookahead: next group
+            r"|\s*Total|\s*$)",              # or end of prizes
+        )
+        for m in prize_pattern.finditer(text):
+            group = int(m.group(1))
+            winners = int(m.group(3).replace(",", ""))
+            amount = int(m.group(4).replace(",", ""))
 
-            rows = table.find_all("tr")
-            for row in rows:
-                cells = row.find_all(["td", "th"])
-                if len(cells) < 4:
-                    continue
-
-                grp_text = cells[0].get_text(strip=True)
-                grp_match = re.search(r"^(\d)$", grp_text)
-                if not grp_match:
-                    continue
-
-                group = int(grp_match.group(1))
-                winners_text = cells[2].get_text(strip=True)
-                payout_text = cells[3].get_text(strip=True)
-
-                winners = 0
-                if re.search(r"\d", winners_text):
-                    winners = int(re.sub(r"[^\d]", "", winners_text))
-
-                amount = 0
-                if re.search(r"\d", payout_text):
-                    amount = int(re.sub(r"[^\d]", "", payout_text))
-
+            # Deduplicate (nested tables cause repeated matches)
+            if not any(p["group"] == group for p in prizes):
                 prizes.append({"group": group, "amount": amount, "winners": winners})
-
                 if group == 1 and amount > 0:
                     jackpot = amount
-
-            if prizes:
-                break
 
         if not winning and not prizes:
             logger.warning(f"LotteryExtreme winners: no data found for {draw_date}")
@@ -318,6 +296,83 @@ async def fetch_lottery_extreme_prizes(draw_date: str) -> dict | None:
         logger.exception("LotteryExtreme winners fetch failed")
 
     return None
+
+
+def _parse_concatenated_numbers(raw: str) -> tuple[list[int] | None, int | None]:
+    """Parse concatenated TOTO numbers like '82534373946 44'.
+
+    Singapore TOTO: 6 winning numbers (1-49) + 1 additional (1-49).
+    The additional is usually separated by a space from the winning set.
+
+    Returns (sorted winning list, additional) or (None, None) on failure.
+    """
+    parts = raw.split()
+
+    if len(parts) == 7:
+        # Already space-separated: "8 25 34 37 39 46 44"
+        try:
+            nums = [int(p) for p in parts]
+            if all(1 <= n <= 49 for n in nums):
+                return sorted(nums[:6]), nums[6]
+        except ValueError:
+            pass
+
+    if len(parts) == 2:
+        # "82534373946 44" — concatenated winning + separate additional
+        concat, add_str = parts
+        try:
+            additional = int(add_str)
+        except ValueError:
+            additional = None
+
+        winning = _split_concat_numbers(concat, 6)
+        if winning and additional and 1 <= additional <= 49:
+            return sorted(winning), additional
+
+    if len(parts) == 1:
+        # All 7 numbers concatenated: "8253437394644"
+        winning = _split_concat_numbers(parts[0], 7)
+        if winning:
+            return sorted(winning[:6]), winning[6]
+
+    return None, None
+
+
+def _split_concat_numbers(s: str, count: int) -> list[int] | None:
+    """Split a concatenated string into `count` numbers, each 1-49.
+
+    Uses backtracking: tries 1-digit then 2-digit at each position.
+    Returns the first valid split, or None.
+    """
+    results: list[list[int]] = []
+
+    def backtrack(pos: int, nums: list[int]):
+        if len(nums) == count:
+            if pos == len(s):
+                results.append(nums[:])
+            return
+        if pos >= len(s):
+            return
+
+        # Try 1-digit number
+        d1 = int(s[pos])
+        if 1 <= d1 <= 9:
+            nums.append(d1)
+            backtrack(pos + 1, nums)
+            nums.pop()
+            if results:
+                return
+
+        # Try 2-digit number
+        if pos + 1 < len(s):
+            d2 = int(s[pos : pos + 2])
+            if 1 <= d2 <= 49:
+                nums.append(d2)
+                backtrack(pos + 2, nums)
+                nums.pop()
+
+    backtrack(0, [])
+    return results[0] if results else None
 
 
 async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
