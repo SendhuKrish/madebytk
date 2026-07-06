@@ -156,9 +156,9 @@
         .no-data { color: var(--text-muted); font-size: .8rem; font-style: italic; padding: .5rem 0; }
         .empty-state { text-align: center; padding: 4rem 2rem; color: var(--text-muted); }
 
-        /* ── Results Column ── */
+        /* ── Winning Shares Column ── */
         .results-col {
-            min-width: 180px;
+            min-width: 200px;
             padding: .5rem .8rem;
             background: #fafaf7;
             border-radius: 8px;
@@ -166,30 +166,18 @@
         }
         .results-col h4 {
             font-size: .72rem; text-transform: uppercase; letter-spacing: .08em;
-            color: var(--text-muted); font-weight: 700; margin-bottom: .6rem;
-        }
-        .results-winning {
-            display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .5rem;
-        }
-        .results-winning .ball { width: 30px; height: 30px; font-size: .72rem; }
-        .results-add-row {
-            display: flex; align-items: center; gap: .3rem;
-            margin-bottom: .6rem; font-size: .72rem; color: var(--text-muted);
-        }
-        .results-add-row .ball { width: 30px; height: 30px; font-size: .72rem; }
-        .results-jackpot {
-            font-size: .78rem; font-weight: 700; color: var(--green-dark);
-            margin-bottom: .4rem;
+            color: var(--text-muted); font-weight: 700; margin-bottom: .5rem;
         }
         .results-stat {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: .2rem 0; font-size: .72rem; color: var(--text-dim);
+            display: flex; align-items: center; gap: .5rem;
+            padding: .25rem 0; font-size: .72rem; color: var(--text-dim);
             border-bottom: 1px solid var(--border-light);
             font-family: 'JetBrains Mono', monospace;
         }
         .results-stat:last-child { border-bottom: none; }
-        .results-stat .label { color: var(--text-muted); }
-        .results-stat .value { font-weight: 600; }
+        .results-stat .label { color: var(--text-muted); min-width: 40px; }
+        .results-stat .value { font-weight: 600; min-width: 70px; text-align: right; }
+        .results-stat .winners { color: var(--text-muted); font-size: .68rem; margin-left: auto; }
 
         /* ── Prize Table ── */
         .prize-section {
@@ -515,7 +503,6 @@
                         </div>
                     </div>
                     <div class="draw-body">
-                        ${hasResults ? renderPrizeSection(draw) : ''}
                         ${(hasPreds || hasBets) ? `
                         <div class="draw-columns">
                             ${hasPreds ? renderPredCol(draw) : ''}
@@ -599,56 +586,18 @@
 
         function renderResultsCol(draw) {
             const r = draw.results;
-            if (!r || !r.winning || r.winning.length === 0) return '';
-            const winning = r.winning;
-            const additional = r.additional;
-            const prizes = r.prizes || [];
-            const jackpot = r.jackpot;
-
-            // Compute match stats across bets
-            const bets = draw.bets || [];
-            let totalBetMatches = 0;
-            let bestBet = 0;
-            bets.forEach(bet => {
-                const { mainMatch } = countMatches(bet.numbers, winning, additional);
-                totalBetMatches += mainMatch;
-                if (mainMatch > bestBet) bestBet = mainMatch;
-            });
-
-            // Compute match stats across predictions
-            const preds = draw.predictions || [];
-            let bestPred = 0;
-            preds.forEach(pred => {
-                const nums = Array.isArray(pred) ? pred : (pred.numbers || []);
-                const { mainMatch } = countMatches(nums, winning, additional);
-                if (mainMatch > bestPred) bestPred = mainMatch;
-            });
-
-            // Group 1 prize display
-            const g1 = prizes.find(p => p.group === 1);
-            const g1Prize = g1 ? (g1.amount > 0 ? `$${g1.amount.toLocaleString()}` : 'Rolled over') : '';
+            if (!r || !r.prizes || r.prizes.length === 0) return '';
+            const prizes = r.prizes;
 
             return `<div class="results-col">
-                <h4>Results</h4>
-                <div class="results-winning">
-                    ${winning.map(n => `<span class="ball win">${pad(n)}</span>`).join('')}
-                </div>
-                <div class="results-add-row">
-                    <span>Additional</span>
-                    ${additional != null ? `<span class="ball bonus-ball">${pad(additional)}</span>` : '<span>—</span>'}
-                </div>
-                ${g1Prize ? `<div class="results-jackpot">Group 1: ${g1Prize}</div>` : ''}
-                <div class="results-stat"><span class="label">Best pred</span><span class="value">${bestPred > 0 ? bestPred + ' match' : '—'}</span></div>
-                <div class="results-stat"><span class="label">Best bet</span><span class="value">${bestBet > 0 ? bestBet + ' match' : '—'}</span></div>
-                ${prizes.length > 0 ? `
-                <div style="margin-top:.5rem;">
-                    ${prizes.filter(p => p.group >= 2 && p.group <= 4).map(p =>
-                        `<div class="results-stat">
-                            <span class="label">Grp ${p.group}</span>
-                            <span class="value">${p.amount > 0 ? '$' + p.amount.toLocaleString() : '—'}</span>
-                        </div>`
-                    ).join('')}
-                </div>` : ''}
+                <h4>Winning Shares</h4>
+                ${prizes.map(p =>
+                    `<div class="results-stat">
+                        <span class="label">Grp ${p.group}</span>
+                        <span class="value">${p.amount > 0 ? '$' + p.amount.toLocaleString() : '—'}</span>
+                        <span class="winners">${p.winners > 0 ? p.winners.toLocaleString() : '—'}</span>
+                    </div>`
+                ).join('')}
             </div>`;
         }
 
