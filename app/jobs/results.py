@@ -4,6 +4,12 @@
 Schedule: Mon & Thu at 19:00 SGT (after the 6:30 PM draw).
 Retries hourly until results appear or deadline hour is reached.
 After results are saved, auto-generates predictions for the next draw.
+
+Source priority:
+  1. Lottery Extreme winners page — numbers + prize breakdown
+  2. Lottolyzer — numbers only (fast updates)
+  3. Lottery Extreme main page — numbers only
+  4. Singapore Pools — JS-rendered, rarely works with BeautifulSoup
 """
 
 import asyncio
@@ -17,7 +23,11 @@ import pytz
 from bs4 import BeautifulSoup
 
 from app.services.db import get_draw_by_date, upsert_draw
-from app.services.scraper import _try_lottolyzer, _try_lottery_extreme
+from app.services.scraper import (
+    _try_lottery_extreme,
+    _try_lottolyzer,
+    fetch_lottery_extreme_prizes,
+)
 from app.utils.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -32,7 +42,11 @@ TIMEOUT = float(settings.scraper_timeout)
 
 
 async def fetch_from_singapore_pools() -> dict | None:
-    """Try fetching latest results from Singapore Pools website."""
+    """Try fetching latest results from Singapore Pools website.
+
+    Note: This page is JS-rendered so BeautifulSoup usually gets
+    incomplete HTML.  Kept as a last-resort fallback.
+    """
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
             resp = await client.get(settings.singapore_pools_url, headers=HEADERS)
@@ -79,21 +93,6 @@ async def fetch_from_singapore_pools() -> dict | None:
             if len(numbers) >= 6:
                 break
 
-        # Fallback: scan all text
-        if len(numbers) < 6:
-            all_text = soup.get_text()
-            num_matches = re.findall(r"\b(\d{1,2})\b", all_text)
-            potential = [int(n) for n in num_matches if 1 <= int(n) <= 49]
-            if len(potential) >= 7:
-                seen = []
-                for n in potential:
-                    if n not in seen:
-                        seen.append(n)
-                    if len(seen) >= 7:
-                        break
-                if len(seen) >= 7:
-                    numbers = seen
-
         # Extract additional number
         additional = None
         add_el = soup.select_one(".additionalNum .ball, .additional-number, #additionalNum")
@@ -107,42 +106,12 @@ async def fetch_from_singapore_pools() -> dict | None:
             if additional is None and len(numbers) >= 7:
                 additional = numbers[6]
 
-            # Extract jackpot and prize breakdown
-            jackpot = None
-            prizes = []
-            jackpot_el = soup.find(string=re.compile(r"Group\s*1\s*Prize", re.IGNORECASE))
-            if jackpot_el:
-                parent = jackpot_el.find_parent()
-                if parent:
-                    amt_match = re.search(r"\$[\d,]+", parent.get_text())
-                    if not amt_match:
-                        nxt = parent.find_next_sibling()
-                        if nxt:
-                            amt_match = re.search(r"\$[\d,]+", nxt.get_text())
-                    if amt_match:
-                        jackpot = int(amt_match.group().replace("$", "").replace(",", ""))
-
-            for table in soup.find_all("table"):
-                header_text = table.get_text().lower()
-                if "prize group" in header_text and "winning shares" in header_text:
-                    rows = table.find_all("tr")[1:]  # skip header
-                    for row in rows:
-                        cells = row.find_all(["td", "th"])
-                        if len(cells) >= 3:
-                            grp_match = re.search(r"(\d)", cells[0].get_text())
-                            amt_text = cells[1].get_text(strip=True)
-                            shares_text = cells[2].get_text(strip=True)
-                            if grp_match:
-                                amt_val = int(amt_text.replace("$", "").replace(",", "")) if re.search(r"\d", amt_text) else 0
-                                shares_val = int(shares_text.replace(",", "")) if re.search(r"\d", shares_text) else 0
-                                prizes.append({"group": int(grp_match.group(1)), "amount": amt_val, "winners": shares_val})
-                    break
-
-            logger.info(f"Singapore Pools: {winning} +{additional} draw={draw_number} date={draw_date} jackpot={jackpot}")
+            logger.info(f"Singapore Pools: {winning} +{additional} draw={draw_number} date={draw_date}")
             return {
-                "winning": winning, "additional": additional,
-                "draw_number": draw_number, "draw_date": draw_date,
-                "jackpot": jackpot, "prizes": prizes,
+                "winning": winning,
+                "additional": additional,
+                "draw_number": draw_number,
+                "draw_date": draw_date,
             }
 
     except Exception:
@@ -151,44 +120,58 @@ async def fetch_from_singapore_pools() -> dict | None:
     return None
 
 
-async def fetch_from_lottolyzer() -> dict | None:
-    """Fallback: fetch from lottolyzer.com."""
-    result = await _try_lottolyzer()
-    if result:
+async def _fetch_results(draw_date: str) -> dict | None:
+    """Try all sources in priority order.
+
+    Returns dict with keys: winning, additional, draw_number, draw_date,
+    and optionally jackpot + prizes.
+    """
+    # ── Source 1: Lottery Extreme winners page (numbers + prizes) ──
+    le_winners = await fetch_lottery_extreme_prizes(draw_date)
+    if le_winners and le_winners.get("numbers"):
         return {
-            "winning": result["numbers"],
-            "additional": result.get("bonus"),
-            "draw_number": str(result["draw_number"]) if result.get("draw_number") else None,
-            "draw_date": result.get("date"),
+            "winning": le_winners["numbers"],
+            "additional": le_winners["bonus"],
+            "draw_number": str(le_winners["draw_number"]) if le_winners.get("draw_number") else None,
+            "draw_date": le_winners.get("date"),
+            "jackpot": le_winners.get("jackpot"),
+            "prizes": le_winners.get("prizes", []),
         }
-    return None
 
-
-async def fetch_from_lottery_extreme() -> dict | None:
-    """Fallback: fetch from lotteryextreme.com."""
-    result = await _try_lottery_extreme()
-    if result:
-        return {
-            "winning": result["numbers"],
-            "additional": result.get("bonus"),
-            "draw_number": None, "draw_date": None,
+    # ── Source 2: Lottolyzer (numbers only, fastest updates) ──
+    lottolyzer = await _try_lottolyzer()
+    if lottolyzer:
+        result = {
+            "winning": lottolyzer["numbers"],
+            "additional": lottolyzer.get("bonus"),
+            "draw_number": str(lottolyzer["draw_number"]) if lottolyzer.get("draw_number") else None,
+            "draw_date": lottolyzer.get("date"),
         }
+        # Try to get prizes from lottery extreme (may have updated by now)
+        le_prizes = await fetch_lottery_extreme_prizes(draw_date)
+        if le_prizes and le_prizes.get("prizes"):
+            result["jackpot"] = le_prizes.get("jackpot")
+            result["prizes"] = le_prizes["prizes"]
+        return result
+
+    # ── Source 3: Lottery Extreme main page (numbers only) ──
+    le_main = await _try_lottery_extreme()
+    if le_main:
+        result = {
+            "winning": le_main["numbers"],
+            "additional": le_main.get("bonus"),
+            "draw_number": str(le_main["draw_number"]) if le_main.get("draw_number") else None,
+            "draw_date": le_main.get("date"),
+        }
+        return result
+
+    # ── Source 4: Singapore Pools (JS-rendered, rarely works) ──
+    logger.warning("Lottolyzer + LotteryExtreme failed, trying Singapore Pools...")
+    sp = await fetch_from_singapore_pools()
+    if sp:
+        return sp
+
     return None
-
-
-async def _fetch_results() -> dict | None:
-    """Try all sources in order."""
-    result = await fetch_from_singapore_pools()
-
-    if not result:
-        logger.warning("Singapore Pools failed, trying lottolyzer...")
-        result = await fetch_from_lottolyzer()
-
-    if not result:
-        logger.warning("Lottolyzer failed, trying lottery extreme...")
-        result = await fetch_from_lottery_extreme()
-
-    return result
 
 
 def _save_results(today: str, result: dict) -> None:
@@ -235,7 +218,7 @@ async def main():
 
     logger.info(f"Running results cron for {today} (retry until {retry_until}:00, every {retry_interval}min)")
 
-    result = await _fetch_results()
+    result = await _fetch_results(today)
 
     while not result:
         now = datetime.now(tz)
@@ -245,7 +228,7 @@ async def main():
 
         logger.warning(f"No results yet. Retrying in {retry_interval} minutes (until {retry_until}:00 {settings.tz})...")
         await asyncio.sleep(retry_interval * 60)
-        result = await _fetch_results()
+        result = await _fetch_results(today)
 
     logger.info(f"Results: {result['winning']} +{result['additional']}")
     _save_results(today, result)
