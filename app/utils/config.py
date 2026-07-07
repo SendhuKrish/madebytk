@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     lottolyzer_url: str
     lottery_extreme_url: str
     lottery_extreme_winners_url: str
+    sg_lotto_result_url: str
     toto_api_url: str
 
     # ── Claude AI ────────────────────────────────────────────────────────────

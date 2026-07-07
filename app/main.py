@@ -22,7 +22,10 @@ from app.utils.models import (
     HealthResponse, PickLine, PostMortemLine,
     PostMortemResponse, PredictionResponse, RuleResult,
 )
-from app.services.scraper import fetch_latest_draw, fetch_lottolyzer_history, fetch_lottery_extreme_prizes, fetch_sg_pools_results
+from app.services.scraper import (
+    fetch_latest_draw, fetch_lottolyzer_history, fetch_lottery_extreme_prizes,
+    fetch_sg_pools_results, fetch_sg_pools_results_by_date, fetch_sglotto_g1prize,
+)
 from app.services.db import (
     delete_draw_by_id, fetch_all_draws, fetch_draws_without_results,
     get_draw_by_date, sign_in_user, upsert_draw,
@@ -424,45 +427,96 @@ async def backfill_prizes():
 
 @app.post("/backfill-g1prize")
 async def backfill_g1prize():
-    """Fetch Group 1 Prize from Singapore Pools and update the latest draw.
+    """Backfill Group 1 Prize for all draws that have results but no group1_prize.
 
-    Also sets estimated_jackpot on the next draw based on snowball status.
+    Strategy:
+      1. Fetch all draws from DB that have winning numbers but no group1_prize
+      2. For each, try SG Pools ASP.NET postback to get the Group 1 Prize
+      3. When Group 1 Prize is found, also set estimated_jackpot on the next draw
+
+    Also always refreshes the latest draw from SG Pools to get snowball info.
     """
+    import asyncio
     from app.jobs.results import _next_draw_date
 
-    sg = await fetch_sg_pools_results()
-    if not sg or not sg.get("numbers"):
-        raise HTTPException(503, "Could not fetch Singapore Pools results")
+    all_draws = fetch_all_draws()
+    updated = []
+    failed = []
 
-    draw_date = sg["date"]
-    draw = get_draw_by_date(draw_date)
-    if not draw:
-        return {"message": f"No draw found for {draw_date}", "updated": 0}
+    # Find draws with results but no group1_prize
+    missing = [
+        d for d in all_draws
+        if d.get("results")
+        and d["results"].get("winning")
+        and len(d["results"]["winning"]) > 0
+        and not d["results"].get("group1_prize")
+    ]
 
-    results = draw.get("results") or {}
-    results["group1_prize"] = sg.get("group1_prize")
-    # Also update prizes if we got them from SG Pools
-    if sg.get("prizes") and (not results.get("prizes") or len(results.get("prizes", [])) == 0):
-        results["prizes"] = sg["prizes"]
-    draw["results"] = results
-    upsert_draw(draw)
+    logger.info(f"Backfill: {len(missing)} draws missing group1_prize")
 
-    # Set estimated jackpot on next draw
-    snowball = sg.get("snowball_amount")
-    next_date = _next_draw_date(draw_date)
-    next_draw = get_draw_by_date(next_date)
-    estimated = snowball if snowball else 1_000_000
+    for draw in missing:
+        draw_date = draw["draw_date"]
+        try:
+            # Try SG Pools postback first (full data), then sglottoresult (g1 only)
+            g1_prize = None
+            snowball = None
+            source = None
 
-    if next_draw:
-        next_results = next_draw.get("results") or {}
-        next_results["estimated_jackpot"] = estimated
-        next_draw["results"] = next_results
-        upsert_draw(next_draw)
+            sg = await fetch_sg_pools_results_by_date(draw_date)
+            if sg and sg.get("group1_prize"):
+                g1_prize = sg["group1_prize"]
+                snowball = sg.get("snowball_amount")
+                source = "sgpools"
+                # Also update prizes if missing
+                results = draw.get("results") or {}
+                if sg.get("prizes") and not results.get("prizes"):
+                    results["prizes"] = sg["prizes"]
+                    draw["results"] = results
+
+            if not g1_prize:
+                # Fallback: sglottoresult.com (Group 1 Prize only)
+                g1_prize = await fetch_sglotto_g1prize(draw_date)
+                source = "sglottoresult" if g1_prize else None
+
+            if g1_prize:
+                results = draw.get("results") or {}
+                results["group1_prize"] = g1_prize
+                draw["results"] = results
+                upsert_draw(draw)
+
+                # Set estimated_jackpot on next draw
+                next_date = _next_draw_date(draw_date)
+                next_draw = get_draw_by_date(next_date)
+                estimated = snowball if snowball else 1_000_000
+
+                if next_draw:
+                    next_results = next_draw.get("results") or {}
+                    if not next_results.get("estimated_jackpot"):
+                        next_results["estimated_jackpot"] = estimated
+                        next_draw["results"] = next_results
+                        upsert_draw(next_draw)
+
+                updated.append({
+                    "date": draw_date,
+                    "group1_prize": g1_prize,
+                    "source": source,
+                })
+                logger.info(f"Backfilled {draw_date}: g1=${g1_prize:,} via {source}")
+            else:
+                failed.append(draw_date)
+                logger.warning(f"Backfill: no g1_prize found for {draw_date}")
+
+            # Brief pause between requests to be polite
+            await asyncio.sleep(1)
+
+        except Exception as e:
+            failed.append(draw_date)
+            logger.exception(f"Backfill failed for {draw_date}: {e}")
 
     return {
-        "message": f"Updated {draw_date} with group1_prize=${sg.get('group1_prize', 0):,}",
-        "group1_prize": sg.get("group1_prize"),
-        "snowball": snowball,
-        "estimated_next": estimated,
-        "next_draw": next_date,
+        "message": f"Updated {len(updated)} draws, {len(failed)} failed",
+        "updated": [u["date"] for u in updated],
+        "details": updated,
+        "failed": failed,
+        "total_missing": len(missing),
     }

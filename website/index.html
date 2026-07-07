@@ -498,7 +498,7 @@
                 if (hasResults && g1Prize) {
                     jackpotBadge = `<span class="jackpot-badge prize">Grp1: $${g1Prize.toLocaleString()}</span>`;
                 } else if (!hasResults && estJackpot) {
-                    jackpotBadge = `<span class="jackpot-badge est">$${estJackpot.toLocaleString()} est</span>`;
+                    jackpotBadge = `<span class="jackpot-badge est">Min $${estJackpot.toLocaleString()}</span>`;
                 }
 
                 return `<div class="draw-card ${i === 0 ? 'open' : ''}" data-idx="${i}">
@@ -506,13 +506,13 @@
                         <div class="draw-left">
                             <span class="draw-date">${formatDate(draw.draw_date)}</span>
                             ${draw.draw_number ? `<span class="draw-num">#${draw.draw_number}</span>` : ''}
-                            ${jackpotBadge}
                             ${hasResults ? `
                                 <div class="winning-row">
                                     ${draw.results.winning.map(n => `<span class="ball win">${pad(n)}</span>`).join('')}
                                     ${draw.results.additional != null ? `<span class="plus-sign">+</span><span class="ball bonus-ball">${pad(draw.results.additional)}</span>` : ''}
                                 </div>
                             ` : ''}
+                            ${jackpotBadge}
                         </div>
                         <div class="draw-right">
                             <span class="draw-stats-text">${hasBets ? statsText : ''}</span>

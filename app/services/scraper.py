@@ -375,6 +375,103 @@ def _split_concat_numbers(s: str, count: int) -> list[int] | None:
     return results[0] if results else None
 
 
+def _parse_sg_pools_page(soup: BeautifulSoup) -> dict | None:
+    """Parse SG Pools results page HTML into structured data.
+
+    Shared parser used by both latest-fetch and date-specific postback.
+
+    Returns:
+        Dict with keys: numbers, bonus, draw_number, date, prizes,
+        group1_prize, snowball_amount.  None if no numbers found.
+    """
+    text = re.sub(r"\s+", " ", soup.get_text()).strip()
+
+    # ── Draw date: "Mon, 06 Jul 2026" ──
+    date_str = None
+    date_match = re.search(
+        r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})",
+        text, re.IGNORECASE,
+    )
+    if date_match:
+        try:
+            date_str = datetime.strptime(
+                f"{date_match.group(1)} {date_match.group(2)} {date_match.group(3)}",
+                "%d %b %Y",
+            ).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    # ── Draw number: "Draw No. 4197" ──
+    draw_number = None
+    dn_match = re.search(r"Draw\s+No\.\s*(\d{4})", text)
+    if dn_match:
+        draw_number = int(dn_match.group(1))
+
+    # ── Winning numbers + additional from table cells ──
+    numbers = []
+    additional = None
+    tables = soup.find_all("table")
+    for table in tables:
+        tds = table.find_all("td")
+        vals = []
+        for td in tds:
+            t = td.get_text(strip=True)
+            if re.fullmatch(r"\d{1,2}", t):
+                val = int(t)
+                if 1 <= val <= 49:
+                    vals.append(val)
+        # First table with 6 numbers = winning numbers
+        if len(vals) == 6 and not numbers:
+            numbers = sorted(vals)
+        # Next table with exactly 1 number = additional
+        elif len(vals) == 1 and numbers and additional is None:
+            additional = vals[0]
+
+    # ── Group 1 Prize total ──
+    group1_prize = None
+    g1_match = re.search(r"Group\s*1\s*Prize\s*\$\s*([\d,]+)", text)
+    if g1_match:
+        group1_prize = int(g1_match.group(1).replace(",", ""))
+
+    # ── Snowball amount ──
+    snowball_amount = None
+    snow_match = re.search(
+        r"prize\s+amount\s+of\s+\$([\d,]+)\s+will\s+be\s+snowballed",
+        text, re.IGNORECASE,
+    )
+    if snow_match:
+        snowball_amount = int(snow_match.group(1).replace(",", ""))
+
+    # ── Winning shares from prize table ──
+    prizes = []
+    for table in tables:
+        headers = [th.get_text(strip=True) for th in table.find_all("th")]
+        if any("Prize Group" in h for h in headers):
+            for row in table.find_all("tr")[1:]:
+                cells = [td.get_text(strip=True) for td in row.find_all("td")]
+                if len(cells) >= 3 and re.match(r"Group\s+\d", cells[0]):
+                    group = int(re.search(r"\d", cells[0]).group())
+                    amt = cells[1].replace("$", "").replace(",", "").strip()
+                    win = cells[2].replace(",", "").strip()
+                    amount = int(amt) if amt.isdigit() else 0
+                    winners = int(win) if win.isdigit() else 0
+                    prizes.append({"group": group, "amount": amount, "winners": winners})
+            break
+
+    if not numbers:
+        return None
+
+    return {
+        "numbers": numbers,
+        "bonus": additional,
+        "draw_number": draw_number,
+        "date": date_str,
+        "prizes": prizes,
+        "group1_prize": group1_prize,
+        "snowball_amount": snowball_amount,
+    }
+
+
 async def fetch_sg_pools_results() -> dict | None:
     """Fetch latest results from Singapore Pools results page.
 
@@ -396,101 +493,177 @@ async def fetch_sg_pools_results() -> dict | None:
             resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "html.parser")
-        text = re.sub(r"\s+", " ", soup.get_text()).strip()
-
-        # ── Draw date: "Mon, 06 Jul 2026" ──
-        date_str = None
-        date_match = re.search(
-            r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})",
-            text, re.IGNORECASE,
-        )
-        if date_match:
-            try:
-                date_str = datetime.strptime(
-                    f"{date_match.group(1)} {date_match.group(2)} {date_match.group(3)}",
-                    "%d %b %Y",
-                ).strftime("%Y-%m-%d")
-            except ValueError:
-                pass
-
-        # ── Draw number: "Draw No. 4197" ──
-        draw_number = None
-        dn_match = re.search(r"Draw\s+No\.\s*(\d{4})", text)
-        if dn_match:
-            draw_number = int(dn_match.group(1))
-
-        # ── Winning numbers + additional from table cells ──
-        numbers = []
-        additional = None
-        tables = soup.find_all("table")
-        for table in tables:
-            tds = table.find_all("td")
-            vals = []
-            for td in tds:
-                t = td.get_text(strip=True)
-                if re.fullmatch(r"\d{1,2}", t):
-                    val = int(t)
-                    if 1 <= val <= 49:
-                        vals.append(val)
-            # First table with 6 numbers = winning numbers
-            if len(vals) == 6 and not numbers:
-                numbers = sorted(vals)
-            # Next table with exactly 1 number = additional
-            elif len(vals) == 1 and numbers and additional is None:
-                additional = vals[0]
-
-        # ── Group 1 Prize total ──
-        group1_prize = None
-        g1_match = re.search(r"Group\s*1\s*Prize\s*\$\s*([\d,]+)", text)
-        if g1_match:
-            group1_prize = int(g1_match.group(1).replace(",", ""))
-
-        # ── Snowball amount ──
-        snowball_amount = None
-        snow_match = re.search(
-            r"prize\s+amount\s+of\s+\$([\d,]+)\s+will\s+be\s+snowballed",
-            text, re.IGNORECASE,
-        )
-        if snow_match:
-            snowball_amount = int(snow_match.group(1).replace(",", ""))
-
-        # ── Winning shares from prize table ──
-        prizes = []
-        for table in tables:
-            headers = [th.get_text(strip=True) for th in table.find_all("th")]
-            if any("Prize Group" in h for h in headers):
-                for row in table.find_all("tr")[1:]:
-                    cells = [td.get_text(strip=True) for td in row.find_all("td")]
-                    if len(cells) >= 3 and re.match(r"Group\s+\d", cells[0]):
-                        group = int(re.search(r"\d", cells[0]).group())
-                        amt = cells[1].replace("$", "").replace(",", "").strip()
-                        win = cells[2].replace(",", "").strip()
-                        amount = int(amt) if amt.isdigit() else 0
-                        winners = int(win) if win.isdigit() else 0
-                        prizes.append({"group": group, "amount": amount, "winners": winners})
-                break
-
-        if not numbers:
+        result = _parse_sg_pools_page(soup)
+        if result:
+            logger.info(
+                f"Singapore Pools: {result['numbers']} +{result['bonus']} "
+                f"draw={result['draw_number']} g1_prize={result['group1_prize']} "
+                f"snowball={result['snowball_amount']} prizes={len(result['prizes'])} groups"
+            )
+        else:
             logger.warning("Singapore Pools: no winning numbers found")
-            return None
-
-        logger.info(
-            f"Singapore Pools: {numbers} +{additional} draw={draw_number} "
-            f"g1_prize={group1_prize} snowball={snowball_amount} "
-            f"prizes={len(prizes)} groups"
-        )
-        return {
-            "numbers": numbers,
-            "bonus": additional,
-            "draw_number": draw_number,
-            "date": date_str,
-            "prizes": prizes,
-            "group1_prize": group1_prize,
-            "snowball_amount": snowball_amount,
-        }
+        return result
 
     except Exception:
         logger.exception("Singapore Pools fetch failed")
+
+    return None
+
+
+async def fetch_sg_pools_results_by_date(target_date: str) -> dict | None:
+    """Fetch results for a specific past draw using ASP.NET postback.
+
+    The SG Pools results page uses a SharePoint dropdown + __doPostBack
+    to navigate between draw dates.  This function:
+      1. GETs the page to capture __VIEWSTATE / __EVENTVALIDATION tokens
+      2. Finds the date dropdown and locates the target date option
+      3. POSTs back with the selected date to load that draw's page
+      4. Parses the response with the shared parser
+
+    Args:
+        target_date: Draw date in YYYY-MM-DD format.
+
+    Returns:
+        Same dict as fetch_sg_pools_results(), or None on failure.
+    """
+    url = settings.singapore_pools_url
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=TIMEOUT, follow_redirects=True,
+        ) as client:
+            # ── Step 1: GET page to capture form tokens ──
+            resp = await client.get(url, headers=HEADERS)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            # Check if the current page already shows the target date
+            current = _parse_sg_pools_page(soup)
+            if current and current.get("date") == target_date:
+                logger.info(f"SG Pools postback: page already shows {target_date}")
+                return current
+
+            # ── Extract ASP.NET form tokens ──
+            def _hidden_val(name: str) -> str:
+                el = soup.find("input", {"name": name})
+                return el.get("value", "") if el else ""
+
+            viewstate = _hidden_val("__VIEWSTATE")
+            viewstate_gen = _hidden_val("__VIEWSTATEGENERATOR")
+            event_validation = _hidden_val("__EVENTVALIDATION")
+
+            if not viewstate:
+                logger.warning("SG Pools postback: no __VIEWSTATE found")
+                return None
+
+            # ── Find the date dropdown ──
+            select_el = soup.find("select")
+            if not select_el:
+                logger.warning("SG Pools postback: no dropdown found")
+                return None
+
+            dropdown_name = select_el.get("name", "")
+
+            # ── Match target date to a dropdown option ──
+            target_dt = datetime.strptime(target_date, "%Y-%m-%d")
+            target_day = target_dt.strftime("%d %b %Y")
+            target_day_no0 = re.sub(r"^0", "", target_day)
+
+            selected_value = None
+            for option in select_el.find_all("option"):
+                opt_text = option.get_text(strip=True)
+                opt_value = option.get("value", opt_text)
+                combined = f"{opt_text} {opt_value}".lower()
+                if (target_day.lower() in combined
+                        or target_day_no0.lower() in combined
+                        or target_date in combined):
+                    selected_value = opt_value
+                    break
+
+            if not selected_value:
+                logger.warning(
+                    f"SG Pools postback: {target_date} not in dropdown "
+                    f"({len(select_el.find_all('option'))} options available)"
+                )
+                return None
+
+            # ── Step 2: POST with date selection ──
+            form_data = {
+                "__VIEWSTATE": viewstate,
+                "__VIEWSTATEGENERATOR": viewstate_gen,
+                "__EVENTVALIDATION": event_validation,
+                "__EVENTTARGET": dropdown_name,
+                "__EVENTARGUMENT": "",
+                dropdown_name: selected_value,
+            }
+
+            post_headers = {
+                **HEADERS,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://www.singaporepools.com.sg",
+                "Referer": url,
+            }
+
+            resp2 = await client.post(url, data=form_data, headers=post_headers)
+            resp2.raise_for_status()
+
+            # ── Step 3: Parse the response ──
+            soup2 = BeautifulSoup(resp2.text, "html.parser")
+            result = _parse_sg_pools_page(soup2)
+
+            if result:
+                logger.info(
+                    f"SG Pools postback [{target_date}]: {result['numbers']} "
+                    f"+{result['bonus']} g1_prize={result['group1_prize']}"
+                )
+            else:
+                logger.warning(f"SG Pools postback: no data parsed for {target_date}")
+
+            return result
+
+    except Exception:
+        logger.exception(f"SG Pools postback failed for {target_date}")
+
+    return None
+
+
+async def fetch_sglotto_g1prize(draw_date: str) -> int | None:
+    """Fetch Group 1 Prize for a specific draw from sglottoresult.com.
+
+    This site has server-rendered individual draw pages with prize tables.
+    URL format: {SG_LOTTO_RESULT_URL}/{YYYY-MM-DD}
+
+    Args:
+        draw_date: Draw date in YYYY-MM-DD format.
+
+    Returns:
+        Group 1 Prize amount as int, or None if not found.
+    """
+    url = f"{settings.sg_lotto_result_url}/{draw_date}"
+
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
+            resp = await client.get(url, headers=HEADERS)
+            resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        text = soup.get_text()
+
+        g1_match = re.search(
+            r"Group\s*1\s*\$\s*([\d,]+(?:\.\d{2})?)",
+            text,
+        )
+        if g1_match:
+            amount_str = g1_match.group(1).replace(",", "").split(".")[0]
+            amount = int(amount_str)
+            logger.info(f"sglottoresult [{draw_date}]: Group 1 Prize = ${amount:,}")
+            return amount
+
+        logger.warning(f"sglottoresult: no Group 1 Prize found for {draw_date}")
+
+    except Exception:
+        logger.exception(f"sglottoresult fetch failed for {draw_date}")
 
     return None
 
@@ -511,13 +684,11 @@ async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
         soup = BeautifulSoup(resp.text, "html.parser")
         text = soup.get_text()
 
-        # Parse draw blocks: "Draw NNNN\nDD Mon YYYY\n"
         draw_blocks = re.findall(
             r"Draw\s+(\d{4})\s*\n\s*(\d{1,2}\s+\w+\s+\d{4})",
             text,
         )
 
-        # Collect ball images, skipping plus signs
         all_imgs = [
             img for img in soup.select("img[src*='ball']")
             if "plus" not in img.get("src", "")
@@ -531,7 +702,6 @@ async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
             if title.isdigit():
                 val = int(title)
             else:
-                # Fallback to src filename
                 src = img.get("src", "")
                 match = re.search(r"ball(\d{1,2})\.", src)
                 if match:
@@ -549,7 +719,6 @@ async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
         if current_group and len(current_group) == 7:
             ball_groups.append(current_group)
 
-        # Match draw info with ball groups
         for i, (draw_num, date_str) in enumerate(draw_blocks):
             if i >= len(ball_groups):
                 break
