@@ -92,12 +92,11 @@
             font-size: .72rem; color: var(--text-muted);
             font-family: 'JetBrains Mono', monospace;
         }
-        .jackpot-row { flex-basis: 100%; text-align: center; }
+        .draw-center { flex: 1; text-align: center; }
         .jackpot-badge {
             font-size: .7rem; font-weight: 700;
             font-family: 'JetBrains Mono', monospace;
             padding: .15rem .5rem; border-radius: 4px;
-            display: inline-block;
         }
         .jackpot-badge.prize { color: var(--green-dark); background: var(--green-bg); }
         .jackpot-badge.est { color: #b45309; background: var(--amber-bg); }
@@ -514,8 +513,8 @@
                                     ${draw.results.additional != null ? `<span class="plus-sign">+</span><span class="ball bonus-ball">${pad(draw.results.additional)}</span>` : ''}
                                 </div>
                             ` : ''}
-                            ${jackpotBadge ? `<div class="jackpot-row">${jackpotBadge}</div>` : ''}
                         </div>
+                        <div class="draw-center">${jackpotBadge}</div>
                         <div class="draw-right">
                             <span class="draw-stats-text">${hasBets ? statsText : ''}</span>
                             ${hasResults && hasPreds ? `<span class="match-count ${predMatchColor}" title="Best prediction match">P${bestPredMatch}</span>` : ''}
