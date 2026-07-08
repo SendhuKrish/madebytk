@@ -17,7 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.utils.config import settings
-from app.services.engine import generate_all, run_postmortem, score_filter, score_position
+from app.services.engine import (
+    LearnedParams, generate_all, learn_parameters,
+    run_postmortem, score_filter, score_position,
+)
 from app.utils.models import (
     HealthResponse, PickLine, PostMortemLine,
     PostMortemResponse, PredictionResponse, RuleResult,
@@ -146,6 +149,27 @@ class LoginRequest(BaseModel):
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+def extract_history(max_draws: int = 100) -> list[list[int]]:
+    """Pull winning numbers from Supabase draws, newest first.
+
+    Used by the v4 self-learning engine to compute POS_AVERAGES and
+    HOT_NUMBERS at prediction time. Skips draws without results
+    (future/pending draws). Bonus number is excluded.
+    """
+    history = []
+    try:
+        for d in fetch_all_draws():
+            results = d.get("results") or {}
+            winning = results.get("winning") or []
+            if len(winning) == 6:
+                history.append(sorted(int(n) for n in winning))
+            if len(history) >= max_draws:
+                break
+    except Exception:
+        logger.exception("extract_history failed — engine will use defaults")
+    return history
+
+
 def _validate_draw(numbers: list[int]) -> None:
     if len(numbers) != 6:
         raise HTTPException(400, "Exactly 6 numbers required")
@@ -155,7 +179,13 @@ def _validate_draw(numbers: list[int]) -> None:
         raise HTTPException(400, "Numbers must be unique")
 
 
-def _build_pick_line(result, line_num: int, strategy: str, last_draw: list[int]) -> PickLine:
+def _build_pick_line(
+    result,
+    line_num: int,
+    strategy: str,
+    last_draw: list[int],
+    params: LearnedParams | None = None,
+) -> PickLine:
     pick = result.pick
     ps = set(pick)
 
@@ -164,7 +194,7 @@ def _build_pick_line(result, line_num: int, strategy: str, last_draw: list[int])
         pos_logic = [
             {"position": i + 1, "number": n, "score": sc, "reasons": reasons}
             for i, n in enumerate(pick)
-            for sc, reasons in [score_position(n, i, last_draw)]
+            for sc, reasons in [score_position(n, i, last_draw, params)]
         ]
 
     return PickLine(
@@ -194,7 +224,17 @@ def _generate_predictions(
 ) -> PredictionResponse:
     logger.info(f"Generating predictions for last_draw={last_draw}")
 
-    concentrated, diverse, low_skew, synthesis, total_passed = generate_all(last_draw, seed=seed)
+    # V4: learn weights from draw history (auto-adapts every prediction)
+    history = extract_history()
+    params = learn_parameters(history)
+    logger.info(
+        f"V4 learned params: draws={params.draws_used} "
+        f"pos_avg={params.pos_averages} hot={sorted(params.hot_numbers)}"
+    )
+
+    concentrated, diverse, low_skew, synthesis, total_passed = generate_all(
+        last_draw, seed=seed, history=history,
+    )
 
     strategies = [
         (concentrated, "concentrated"),
@@ -205,7 +245,9 @@ def _generate_predictions(
     lines = []
     for group, strategy in strategies:
         for r in group:
-            lines.append(_build_pick_line(r, len(lines) + 1, strategy, last_draw))
+            lines.append(
+                _build_pick_line(r, len(lines) + 1, strategy, last_draw, params)
+            )
 
     return PredictionResponse(
         draw_number=(draw_number + 1) if draw_number else None,
