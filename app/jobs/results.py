@@ -28,6 +28,7 @@ from app.services.scraper import (
     _try_lottolyzer,
     fetch_lottery_extreme_prizes,
     fetch_sg_pools_results,
+    fetch_sglotto_g1prize,
 )
 from app.utils.config import settings
 
@@ -298,6 +299,37 @@ async def main():
 
     logger.info(f"Results: {result['winning']} +{result['additional']}")
     _save_results(today, result)
+
+    # ── Retry for group1_prize if missing ──
+    if not result.get("group1_prize"):
+        logger.info("group1_prize not available yet — will retry hourly")
+        while True:
+            now = datetime.now(tz)
+            if now.hour >= retry_until:
+                logger.warning(f"group1_prize still missing at {retry_until}:00 deadline — giving up")
+                break
+
+            await asyncio.sleep(retry_interval * 60)
+
+            # Try SG Pools first (full data including snowball)
+            sg = await fetch_sg_pools_results()
+            if sg and sg.get("date") == today and sg.get("group1_prize"):
+                result["group1_prize"] = sg["group1_prize"]
+                result["snowball_amount"] = sg.get("snowball_amount")
+                logger.info(f"group1_prize found via SG Pools: ${sg['group1_prize']:,}")
+                _save_results(today, result)
+                break
+
+            # Fallback: sglottoresult.com
+            g1 = await fetch_sglotto_g1prize(today)
+            if g1:
+                result["group1_prize"] = g1
+                logger.info(f"group1_prize found via sglottoresult: ${g1:,}")
+                _save_results(today, result)
+                break
+
+            logger.info(f"group1_prize still not available — retrying in {retry_interval}min")
+
     await _generate_next_predictions(result)
     logger.info("Results cron complete")
 
