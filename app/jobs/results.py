@@ -2,206 +2,84 @@
 """Cron job: Fetch actual draw results and store in Supabase.
 
 Schedule: Mon & Thu at 19:00 SGT (after the 6:30 PM draw).
-Retries hourly until results appear or deadline hour is reached.
+Retries hourly until ALL required data is available or deadline is reached.
 After results are saved, auto-generates predictions for the next draw.
 
-Source priority:
-  1. Singapore Pools results page — numbers + Group 1 Prize + prizes + snowball
-  2. Lottery Extreme winners page — numbers + prize breakdown (fallback)
-  3. Lottolyzer — numbers only (fallback)
-  4. Lottery Extreme main page — numbers only (fallback)
+Source: Singapore Pools results page only (no fallbacks).
+Required before saving:
+  1. Current draw winning numbers
+  2. Current draw groupwise winning shares
+  3. Next draw jackpot amount (snowball or confirmed Group 1 winner)
 """
 
 import asyncio
 import logging
-import re
 import sys
 from datetime import date, datetime, timedelta
 
-import httpx
 import pytz
-from bs4 import BeautifulSoup
 
 from app.services.db import get_draw_by_date, upsert_draw
-from app.services.scraper import (
-    _try_lottery_extreme,
-    _try_lottolyzer,
-    fetch_lottery_extreme_prizes,
-    fetch_sg_pools_results,
-    fetch_sglotto_g1prize,
-)
+from app.services.scraper import fetch_sg_pools_results
 from app.utils.config import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("cron-results")
 
-HEADERS = {
-    "User-Agent": settings.scraper_user_agent,
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
-TIMEOUT = float(settings.scraper_timeout)
-
-
-async def fetch_from_singapore_pools() -> dict | None:
-    """Try fetching latest results from Singapore Pools website.
-
-    Note: This page is JS-rendered so BeautifulSoup usually gets
-    incomplete HTML.  Kept as a last-resort fallback.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-            resp = await client.get(settings.singapore_pools_url, headers=HEADERS)
-            resp.raise_for_status()
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # Extract draw date
-        draw_date = None
-        date_el = soup.select_one(".drawDate, .draw-date, #drawDate")
-        if date_el:
-            text = date_el.get_text(strip=True)
-            date_match = re.search(
-                r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})",
-                text, re.IGNORECASE,
-            )
-            if date_match:
-                draw_date = datetime.strptime(
-                    f"{date_match.group(1)} {date_match.group(2)} {date_match.group(3)}",
-                    "%d %b %Y",
-                ).strftime("%Y-%m-%d")
-
-        # Extract draw number
-        draw_number = None
-        draw_num_el = soup.select_one(".drawNumber, .draw-number, #drawNumber")
-        if draw_num_el:
-            num_match = re.search(r"(\d{4})", draw_num_el.get_text())
-            if num_match:
-                draw_number = num_match.group(1)
-
-        # Extract winning numbers
-        numbers = []
-        for selector in [
-            ".winningNums .ball", ".winning-numbers .ball", ".drawNumber-ball",
-            "table.tableWinNum td", ".winNum", ".toto-winning-number",
-        ]:
-            balls = soup.select(selector)
-            for b in balls:
-                text = b.get_text(strip=True)
-                if text.isdigit():
-                    val = int(text)
-                    if 1 <= val <= 49:
-                        numbers.append(val)
-            if len(numbers) >= 6:
-                break
-
-        # Extract additional number
-        additional = None
-        add_el = soup.select_one(".additionalNum .ball, .additional-number, #additionalNum")
-        if add_el:
-            text = add_el.get_text(strip=True)
-            if text.isdigit():
-                additional = int(text)
-
-        if len(numbers) >= 6:
-            winning = sorted(numbers[:6])
-            if additional is None and len(numbers) >= 7:
-                additional = numbers[6]
-
-            logger.info(f"Singapore Pools: {winning} +{additional} draw={draw_number} date={draw_date}")
-            return {
-                "winning": winning,
-                "additional": additional,
-                "draw_number": draw_number,
-                "draw_date": draw_date,
-            }
-
-    except Exception:
-        logger.exception("Singapore Pools fetch failed")
-
-    return None
-
 
 async def _fetch_results(draw_date: str) -> dict | None:
-    """Try all sources in priority order.
+    """Fetch results from Singapore Pools only.
 
-    Returns dict with keys: winning, additional, draw_number, draw_date,
-    and optionally prizes, group1_prize, snowball_amount.
+    Returns structured dict or None if SG Pools doesn't have this draw yet.
     """
-    # ── Source 1: Singapore Pools results page (primary) ──
     sg = await fetch_sg_pools_results()
-    if sg and sg.get("numbers") and sg.get("date") == draw_date:
-        return {
-            "winning": sg["numbers"],
-            "additional": sg["bonus"],
-            "draw_number": str(sg["draw_number"]) if sg.get("draw_number") else None,
-            "draw_date": sg.get("date"),
-            "prizes": sg.get("prizes", []),
-            "group1_prize": sg.get("group1_prize"),
-            "snowball_amount": sg.get("snowball_amount"),
-        }
+    if not sg or not sg.get("numbers") or sg.get("date") != draw_date:
+        return None
 
-    # ── Source 2: Lottery Extreme winners page (numbers + prizes) ──
-    le_winners = await fetch_lottery_extreme_prizes(draw_date)
-    if le_winners and le_winners.get("numbers"):
-        result = {
-            "winning": le_winners["numbers"],
-            "additional": le_winners["bonus"],
-            "draw_number": str(le_winners["draw_number"]) if le_winners.get("draw_number") else None,
-            "draw_date": le_winners.get("date"),
-            "prizes": le_winners.get("prizes", []),
-        }
-        # Enrich with SG Pools Group 1 Prize if available
-        if sg and sg.get("group1_prize"):
-            result["group1_prize"] = sg["group1_prize"]
-            result["snowball_amount"] = sg.get("snowball_amount")
-        return result
+    return {
+        "winning": sg["numbers"],
+        "additional": sg["bonus"],
+        "draw_number": str(sg["draw_number"]) if sg.get("draw_number") else None,
+        "draw_date": sg.get("date"),
+        "prizes": sg.get("prizes", []),
+        "group1_prize": sg.get("group1_prize"),
+        "snowball_amount": sg.get("snowball_amount"),
+    }
 
-    # ── Source 3: Lottolyzer (numbers only, fastest updates) ──
-    lottolyzer = await _try_lottolyzer()
-    if lottolyzer:
-        result = {
-            "winning": lottolyzer["numbers"],
-            "additional": lottolyzer.get("bonus"),
-            "draw_number": str(lottolyzer["draw_number"]) if lottolyzer.get("draw_number") else None,
-            "draw_date": lottolyzer.get("date"),
-        }
-        # Try to get prizes from lottery extreme
-        le_prizes = await fetch_lottery_extreme_prizes(draw_date)
-        if le_prizes and le_prizes.get("prizes"):
-            result["prizes"] = le_prizes["prizes"]
-        # Enrich with SG Pools Group 1 Prize
-        if sg and sg.get("group1_prize"):
-            result["group1_prize"] = sg["group1_prize"]
-            result["snowball_amount"] = sg.get("snowball_amount")
-        return result
 
-    # ── Source 4: Lottery Extreme main page (numbers only) ──
-    le_main = await _try_lottery_extreme()
-    if le_main:
-        return {
-            "winning": le_main["numbers"],
-            "additional": le_main.get("bonus"),
-            "draw_number": str(le_main["draw_number"]) if le_main.get("draw_number") else None,
-            "draw_date": le_main.get("date"),
-        }
+def _results_complete(result: dict) -> tuple[bool, str]:
+    """Check all three required data points are present.
 
-    # ── Source 5: Singapore Pools CSS-selector fallback ──
-    logger.warning("All primary sources failed, trying SG Pools CSS fallback...")
-    sp = await fetch_from_singapore_pools()
-    if sp:
-        return sp
+    Returns (True, "") if complete, or (False, reason) if something is missing.
+    """
+    # 1. Winning numbers
+    if not result.get("winning") or len(result["winning"]) != 6:
+        return False, "winning numbers"
 
-    return None
+    # 2. Groupwise winning shares
+    if not result.get("prizes") or len(result["prizes"]) == 0:
+        return False, "groupwise winning shares"
+
+    # 3. Next draw jackpot amount
+    g1 = next((p for p in result["prizes"] if p.get("group") == 1), None)
+    if not g1:
+        return False, "Group 1 prize data"
+
+    if g1.get("winners", 0) == 0:
+        # Group 1 not won — need snowball or group1_prize to set next jackpot
+        if not result.get("snowball_amount") and not result.get("group1_prize"):
+            return False, "next draw jackpot amount (snowball not yet available)"
+
+    return True, ""
 
 
 def _next_draw_date(draw_date_str: str) -> str:
     """Get the next Toto draw date (Mon/Thu) after the given date."""
     dt = datetime.strptime(draw_date_str, "%Y-%m-%d")
     weekday = dt.weekday()  # 0=Mon, 3=Thu
-    if weekday == 0:    # Monday → Thursday
+    if weekday == 0:    # Monday -> Thursday
         delta = 3
-    elif weekday == 3:  # Thursday → Monday
+    elif weekday == 3:  # Thursday -> Monday
         delta = 4
     else:
         # Off-schedule draw: find next Mon or Thu
@@ -221,7 +99,6 @@ def _save_results(today: str, result: dict) -> None:
     results_data = {
         "winning": result["winning"],
         "additional": result["additional"],
-        "jackpot": result.get("jackpot"),
         "prizes": result.get("prizes", []),
         "group1_prize": result.get("group1_prize"),
     }
@@ -243,14 +120,21 @@ def _save_results(today: str, result: dict) -> None:
         logger.info(f"Created new draw record with results for {today}")
 
     # ── Set estimated jackpot on the next draw ──
-    snowball = result.get("snowball_amount")
     next_date = _next_draw_date(today)
     next_draw = get_draw_by_date(next_date)
 
+    snowball = result.get("snowball_amount")
+    group1_prize = result.get("group1_prize")
+    prizes = result.get("prizes", [])
+    g1 = next((p for p in prizes if p.get("group") == 1), None)
+
     if snowball:
-        # Group 1 snowballed — next draw inherits this amount
         estimated = snowball
-        logger.info(f"Snowball detected: ${snowball:,} → setting estimated_jackpot on {next_date}")
+        logger.info(f"Snowball: ${snowball:,} -> estimated_jackpot on {next_date}")
+    elif g1 and g1.get("winners", 0) == 0 and group1_prize:
+        # Group 1 not won, no explicit snowball text — use group1_prize
+        estimated = group1_prize
+        logger.info(f"Group 1 not won: ${group1_prize:,} -> estimated_jackpot on {next_date}")
     else:
         # Group 1 was won — next draw starts at minimum $1,000,000
         estimated = 1_000_000
@@ -277,7 +161,7 @@ async def _generate_next_predictions(result: dict) -> None:
 
 
 async def main():
-    """Fetch results with retry. On success, auto-generate next predictions."""
+    """Fetch results, retry hourly until all data is complete."""
     today = date.today().isoformat()
     tz = pytz.timezone(settings.tz)
     retry_until = settings.results_retry_until_hour
@@ -285,51 +169,31 @@ async def main():
 
     logger.info(f"Running results cron for {today} (retry until {retry_until}:00, every {retry_interval}min)")
 
-    result = await _fetch_results(today)
+    while True:
+        result = await _fetch_results(today)
 
-    while not result:
+        if result:
+            complete, missing = _results_complete(result)
+            if complete:
+                break
+            logger.warning(f"Incomplete results — missing: {missing}")
+        else:
+            logger.warning("No results from Singapore Pools yet")
+
         now = datetime.now(tz)
         if now.hour >= retry_until:
-            logger.error(f"All sources failed and past retry deadline ({retry_until}:00). Giving up.")
+            if result:
+                # Have partial results — save what we have rather than losing everything
+                logger.warning(f"Deadline reached with incomplete data — saving partial results")
+                break
+            logger.error(f"No results at all by {retry_until}:00 deadline. Giving up.")
             sys.exit(1)
 
-        logger.warning(f"No results yet. Retrying in {retry_interval} minutes (until {retry_until}:00 {settings.tz})...")
+        logger.info(f"Retrying in {retry_interval} minutes (until {retry_until}:00 {settings.tz})...")
         await asyncio.sleep(retry_interval * 60)
-        result = await _fetch_results(today)
 
     logger.info(f"Results: {result['winning']} +{result['additional']}")
     _save_results(today, result)
-
-    # ── Retry for group1_prize if missing ──
-    if not result.get("group1_prize"):
-        logger.info("group1_prize not available yet — will retry hourly")
-        while True:
-            now = datetime.now(tz)
-            if now.hour >= retry_until:
-                logger.warning(f"group1_prize still missing at {retry_until}:00 deadline — giving up")
-                break
-
-            await asyncio.sleep(retry_interval * 60)
-
-            # Try SG Pools first (full data including snowball)
-            sg = await fetch_sg_pools_results()
-            if sg and sg.get("date") == today and sg.get("group1_prize"):
-                result["group1_prize"] = sg["group1_prize"]
-                result["snowball_amount"] = sg.get("snowball_amount")
-                logger.info(f"group1_prize found via SG Pools: ${sg['group1_prize']:,}")
-                _save_results(today, result)
-                break
-
-            # Fallback: sglottoresult.com
-            g1 = await fetch_sglotto_g1prize(today)
-            if g1:
-                result["group1_prize"] = g1
-                logger.info(f"group1_prize found via sglottoresult: ${g1:,}")
-                _save_results(today, result)
-                break
-
-            logger.info(f"group1_prize still not available — retrying in {retry_interval}min")
-
     await _generate_next_predictions(result)
     logger.info("Results cron complete")
 
