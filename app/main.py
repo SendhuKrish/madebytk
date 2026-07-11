@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.utils.config import settings
 from app.services.engine import (
-    LearnedParams, generate_all, learn_parameters,
+    LearnedParams, generate_all, generate_jackpot, learn_parameters,
     run_postmortem, score_filter, score_position,
 )
 from app.utils.models import (
@@ -132,6 +132,10 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 class ManualPredictRequest(BaseModel):
     numbers: list[int] = Field(..., min_length=6, max_length=6)
     seed: int | None = None
+    lines: int | None = Field(
+        None, ge=10, le=40,
+        description="Jackpot mode: generate this many lines (10-40)",
+    )
 
 
 class PostMortemRequest(BaseModel):
@@ -221,8 +225,12 @@ def _generate_predictions(
     seed: int | None = None,
     draw_number: int | None = None,
     last_draw_date: str | None = None,
+    n_lines: int | None = None,
 ) -> PredictionResponse:
-    logger.info(f"Generating predictions for last_draw={last_draw}")
+    logger.info(
+        f"Generating predictions for last_draw={last_draw}"
+        + (f" [JACKPOT MODE: {n_lines} lines]" if n_lines else "")
+    )
 
     # V4: learn weights from draw history (auto-adapts every prediction)
     history = extract_history()
@@ -232,16 +240,29 @@ def _generate_predictions(
         f"pos_avg={params.pos_averages} hot={sorted(params.hot_numbers)}"
     )
 
-    concentrated, diverse, low_skew, synthesis, total_passed = generate_all(
-        last_draw, seed=seed, history=history,
-    )
+    if n_lines:
+        # Jackpot mode: 10-40 lines across five strategies
+        groups, total_passed = generate_jackpot(
+            last_draw, seed=seed, history=history, n_lines=n_lines,
+        )
+        strategies = [
+            (groups["concentrated"], "concentrated"),
+            (groups["diverse"], "diverse"),
+            (groups["low_skew"], "low_skew"),
+            (groups["high_skew"], "high_skew"),
+            (groups["synthesis"], "synthesis"),
+        ]
+    else:
+        concentrated, diverse, low_skew, synthesis, total_passed = generate_all(
+            last_draw, seed=seed, history=history,
+        )
+        strategies = [
+            (concentrated, "concentrated"),
+            (diverse, "diverse"),
+            (low_skew, "low_skew"),
+            (synthesis, "synthesis"),
+        ]
 
-    strategies = [
-        (concentrated, "concentrated"),
-        (diverse, "diverse"),
-        (low_skew, "low_skew"),
-        (synthesis, "synthesis"),
-    ]
     lines = []
     for group, strategy in strategies:
         for r in group:
@@ -281,7 +302,9 @@ async def get_last_draw():
 
 
 @app.get("/predict", response_model=PredictionResponse)
-async def predict_auto(seed: int | None = None):
+async def predict_auto(seed: int | None = None, lines: int | None = None):
+    if lines is not None and not (10 <= lines <= 40):
+        raise HTTPException(400, "lines must be between 10 and 40")
     draw_data = await fetch_latest_draw()
     if not draw_data:
         raise HTTPException(503, "Could not fetch latest draw. Use POST /predict with manual input.")
@@ -290,13 +313,16 @@ async def predict_auto(seed: int | None = None):
         seed=seed,
         draw_number=draw_data.get("draw_number"),
         last_draw_date=draw_data.get("date"),
+        n_lines=lines,
     )
 
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict_manual(req: ManualPredictRequest):
     _validate_draw(req.numbers)
-    return _generate_predictions(last_draw=sorted(req.numbers), seed=req.seed)
+    return _generate_predictions(
+        last_draw=sorted(req.numbers), seed=req.seed, n_lines=req.lines,
+    )
 
 
 @app.post("/postmortem", response_model=PostMortemResponse)

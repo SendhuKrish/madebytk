@@ -351,13 +351,14 @@ def generate_diverse(
     n_lines: int = 3,
     exclude: set[int] | None = None,
     seed: int | None = None,
+    n_candidates: int = CANDIDATE_COUNT,
 ) -> tuple[list[ScoredPick], int]:
     """Generate diverse balanced lines."""
     if seed is not None:
         random.seed(seed)
 
     candidates = []
-    for _ in range(CANDIDATE_COUNT):
+    for _ in range(n_candidates):
         pick = sorted(random.sample(POOL, 6))
         result = score_filter(pick, last_draw)
         if result.filter_score >= MIN_FILTER_SCORE:
@@ -384,16 +385,55 @@ def generate_low_skew(
     n_lines: int = 1,
     exclude: set[int] | None = None,
     seed: int | None = None,
+    n_candidates: int = CANDIDATE_COUNT,
 ) -> list[ScoredPick]:
     """Generate low-skew lines (5+ numbers <= 25)."""
     if seed is not None:
         random.seed(seed)
 
     candidates = []
-    for _ in range(CANDIDATE_COUNT):
+    for _ in range(n_candidates):
         pick = sorted(random.sample(POOL, 6))
         result = score_filter(pick, last_draw)
         if result.low_count >= 5 and result.filter_score >= MIN_SKEW_SCORE:
+            candidates.append(result)
+
+    candidates.sort(key=lambda x: (-x.filter_score, -x.nb3))
+
+    used = set(exclude) if exclude else set()
+    lines = []
+    for c in candidates:
+        if len(lines) >= n_lines:
+            break
+        overlap = sum(1 for n in c.pick if n in used)
+        if overlap <= 2:
+            lines.append(c)
+            used.update(c.pick)
+
+    return lines
+
+
+def generate_high_skew(
+    last_draw: list[int],
+    n_lines: int = 1,
+    exclude: set[int] | None = None,
+    seed: int | None = None,
+    n_candidates: int = CANDIDATE_COUNT,
+) -> list[ScoredPick]:
+    """Generate high-skew lines (5+ numbers >= 25).
+
+    Mirror of low-skew: catches draws like #4198 [23,27,31,38,42,47]
+    where the draw packs into the upper half with one low outlier.
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    candidates = []
+    for _ in range(n_candidates):
+        pick = sorted(random.sample(POOL, 6))
+        result = score_filter(pick, last_draw)
+        high_count = sum(1 for n in pick if n >= 25)
+        if high_count >= 5 and result.filter_score >= MIN_SKEW_SCORE:
             candidates.append(result)
 
     candidates.sort(key=lambda x: (-x.filter_score, -x.nb3))
@@ -433,6 +473,14 @@ def generate_synthesis(
     pool = sorted(num_freq.keys())
     if len(pool) < 6:
         return []
+
+    # Cap pool for combinatorial tractability: keep highest-consensus
+    # numbers first (ties broken by nearness to last draw). C(18,6)=18k.
+    if len(pool) > 18:
+        def _pool_rank(n: int) -> tuple:
+            near = min(abs(n - p) for p in last_draw)
+            return (-num_freq[n], near)
+        pool = sorted(pool, key=_pool_rank)[:18]
 
     best = []
     for combo in combinations(pool, 6):
@@ -505,6 +553,112 @@ def generate_all(
     synthesis = generate_synthesis(last_draw, all_lines, concentrated_nums=conc_nums)
 
     return conc_best, diverse, low_skew, synthesis, total_passed
+
+
+def generate_jackpot(
+    last_draw: list[int],
+    seed: int | None = None,
+    history: list[list[int]] | None = None,
+    n_lines: int = 30,
+) -> tuple[dict[str, list[ScoredPick]], int]:
+    """Jackpot mode: generate 10-40 lines across all strategies.
+
+    Allocation for n_lines=30:
+      concentrated 3, diverse 17, low_skew 4, high_skew 4, synthesis 2.
+    Diverse lines are generated in WAVES (fresh exclusion set per wave of
+    ~8 lines) so coverage layers across the whole 1-49 pool instead of
+    exhausting after one pass.
+
+    Returns:
+        (groups dict keyed by strategy, total_candidates_passed)
+    """
+    n_lines = max(10, min(40, n_lines))
+    params = learn_parameters(history)
+
+    # ── Allocation (scales proportionally with n_lines) ──
+    n_conc = max(2, round(n_lines * 0.10))
+    n_skew_lo = max(2, round(n_lines * 0.13))
+    n_skew_hi = max(2, round(n_lines * 0.13))
+    n_synth = max(1, round(n_lines * 0.07))
+    n_div = n_lines - n_conc - n_skew_lo - n_skew_hi - n_synth
+
+    seen: set[tuple] = set()
+
+    def dedupe(lines: list[ScoredPick]) -> list[ScoredPick]:
+        out = []
+        for line in lines:
+            key = tuple(line.pick)
+            if key not in seen:
+                seen.add(key)
+                out.append(line)
+        return out
+
+    # 1. Concentrated: top-N from position brute-force
+    concentrated = dedupe(generate_concentrated(last_draw, params)[:n_conc])
+
+    # 2. Diverse in waves (each wave gets a fresh exclusion set)
+    diverse: list[ScoredPick] = []
+    total_passed = 0
+    wave_size = 8
+    wave_idx = 0
+    while len(diverse) < n_div and wave_idx < 6:
+        want = min(wave_size, n_div - len(diverse))
+        wave_exclude = set(n for l in concentrated for n in l.pick) if wave_idx == 0 else set()
+        wave, passed = generate_diverse(
+            last_draw, n_lines=want, exclude=wave_exclude,
+            seed=(seed or 0) + wave_idx * 101,
+            n_candidates=120_000,
+        )
+        if wave_idx == 0:
+            total_passed = passed
+        diverse.extend(dedupe(wave))
+        wave_idx += 1
+
+    # 3. Low-skew + 4. High-skew
+    low_skew = dedupe(generate_low_skew(
+        last_draw, n_lines=n_skew_lo, seed=(seed or 0) + 1,
+        n_candidates=150_000,
+    ))
+    high_skew = dedupe(generate_high_skew(
+        last_draw, n_lines=n_skew_hi, seed=(seed or 0) + 2,
+        n_candidates=150_000,
+    ))
+
+    # 5. Synthesis: recombinations of everything above
+    source = concentrated + diverse + low_skew + high_skew
+    conc_nums = set(n for l in concentrated for n in l.pick)
+    synth_all = generate_synthesis(last_draw, source, concentrated_nums=conc_nums)
+    # generate_synthesis returns top-1; for more, re-run excluding prior picks
+    synthesis: list[ScoredPick] = dedupe(synth_all)
+    attempts = 0
+    while len(synthesis) < n_synth and attempts < 5:
+        pruned = [l for l in source if tuple(l.pick) not in
+                  {tuple(s.pick) for s in synthesis}]
+        extra = generate_synthesis(
+            last_draw, pruned + synthesis,
+            concentrated_nums=conc_nums | set(
+                n for s in synthesis for n in s.pick
+            ),
+        )
+        new = dedupe(extra)
+        if not new:
+            break
+        synthesis.extend(new)
+        attempts += 1
+
+    groups = {
+        "concentrated": concentrated,
+        "diverse": diverse,
+        "low_skew": low_skew,
+        "high_skew": high_skew,
+        "synthesis": synthesis[:n_synth],
+    }
+    logger.info(
+        "generate_jackpot: " + ", ".join(
+            f"{k}={len(v)}" for k, v in groups.items()
+        )
+    )
+    return groups, total_passed
 
 
 def run_postmortem(
