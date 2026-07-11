@@ -271,6 +271,16 @@
         .extracted-bets { display: none; margin-top: 1rem; padding: 1rem; background: var(--green-bg); border-radius: 8px; }
         .extracted-bets h4 { color: var(--green-dark); font-size: .85rem; margin-bottom: .5rem; }
         .extracted-bet-item { display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem; }
+        .bet-actions { display: flex; gap: .3rem; margin-left: auto; }
+        .bet-btn { background: none; border: none; cursor: pointer; font-size: .75rem; padding: .15rem .4rem; border-radius: 4px; color: var(--text-muted); }
+        .bet-btn:hover { background: #e5e5dd; color: var(--text); }
+        .bet-btn.del:hover { background: #fee2e2; color: var(--red); }
+        .bet-edit-row { display: flex; align-items: center; gap: .4rem; margin-bottom: .4rem; flex-wrap: wrap; }
+        .bet-edit-row input { width: 38px; text-align: center; padding: .2rem; border: 1.5px solid var(--border); border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: .8rem; }
+        .bet-edit-row input:focus { border-color: var(--accent); outline: none; }
+        .bet-edit-row select { padding: .2rem .3rem; border: 1.5px solid var(--border); border-radius: 4px; font-size: .75rem; }
+        .bet-edit-row .bet-btn.save { color: var(--green-dark); }
+        .bet-edit-row .bet-btn.save:hover { background: var(--green-bg); }
         .btn { padding: .5rem 1rem; border-radius: 8px; font-weight: 600; font-size: .85rem; cursor: pointer; border: none; }
         .btn-primary { background: var(--accent); color: #fff; }
         .btn-success { background: var(--green); color: #fff; }
@@ -720,17 +730,8 @@
                 if (!response.ok) { const err = await response.json(); throw new Error(err.detail || 'Server error'); }
                 extractedData = await response.json();
                 const bets = extractedData.bets || [];
-                let infoHtml = '';
-                if (extractedData.draw_date) infoHtml += `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.2rem;">Draw Date: <strong>${extractedData.draw_date}</strong></p>`;
-                if (extractedData.draw_number) infoHtml += `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.4rem;">Draw #: <strong>${extractedData.draw_number}</strong></p>`;
-                $('extractedInfo').innerHTML = infoHtml;
-                $('extractedList').innerHTML = bets.map(bet =>
-                    `<div class="extracted-bet-item">
-                        <span class="bet-type-tag">${bet.type}</span>
-                        <div class="line-balls">${bet.numbers.map(n => `<span class="ball">${pad(n)}</span>`).join('')}</div>
-                    </div>`
-                ).join('');
-                $('extractedBets').style.display = 'block';
+                renderExtractedInfo();
+                renderBetList();
                 $('saveDraw').style.display = 'inline-flex';
                 showStatus('ocrStatus', 'success', `Extracted ${bets.length} bet(s) successfully!`);
             } catch(err) {
@@ -788,20 +789,72 @@
             hideStatus('saveStatus'); hideStatus('ocrStatus');
         }
 
-        function loadDrawIntoForm(draw) {
-            editingDrawId = draw.id;
-            extractedData = { draw_date: draw.draw_date, draw_number: draw.draw_number, bets: draw.bets || [] };
-            let infoHtml = `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.2rem;">Draw Date: <strong>${draw.draw_date}</strong></p>`;
-            if (draw.draw_number) infoHtml += `<p style="font-size:.82rem;color:var(--text-dim);margin-bottom:.4rem;">Draw #: <strong>${draw.draw_number}</strong></p>`;
-            $('extractedInfo').innerHTML = infoHtml;
-            const bets = draw.bets || [];
-            $('extractedList').innerHTML = bets.map(bet =>
-                `<div class="extracted-bet-item">
+        function renderExtractedInfo() {
+            if (!extractedData) return;
+            const d = extractedData;
+            $('extractedInfo').innerHTML = `
+                <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem;">
+                    <label style="font-size:.82rem;color:var(--text-dim);">Draw Date:
+                        <input type="date" value="${d.draw_date || ''}" style="font-weight:700;font-size:.82rem;padding:.15rem .3rem;border:1.5px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;"
+                            onchange="extractedData.draw_date=this.value">
+                    </label>
+                    <label style="font-size:.82rem;color:var(--text-dim);">Draw #:
+                        <input type="text" value="${d.draw_number || ''}" style="width:60px;font-weight:700;font-size:.82rem;padding:.15rem .3rem;border:1.5px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;"
+                            onchange="extractedData.draw_number=this.value">
+                    </label>
+                </div>`;
+        }
+
+        function renderBetList() {
+            const bets = extractedData ? (extractedData.bets || []) : [];
+            $('extractedList').innerHTML = bets.map((bet, i) =>
+                `<div class="extracted-bet-item" data-idx="${i}">
                     <span class="bet-type-tag">${bet.type}</span>
                     <div class="line-balls">${bet.numbers.map(n => `<span class="ball">${pad(n)}</span>`).join('')}</div>
+                    <div class="bet-actions">
+                        <button class="bet-btn" onclick="editBet(${i})" title="Edit">&#9998;</button>
+                        <button class="bet-btn del" onclick="deleteBet(${i})" title="Delete">&times;</button>
+                    </div>
                 </div>`
             ).join('');
             $('extractedBets').style.display = bets.length ? 'block' : 'none';
+        }
+
+        window.editBet = function(idx) {
+            const bet = extractedData.bets[idx];
+            const row = document.querySelector(`.extracted-bet-item[data-idx="${idx}"]`);
+            const types = ['Ordinary','System 7','System 8','System 9','System 10','System 11','System 12'];
+            row.className = 'bet-edit-row';
+            row.innerHTML = `
+                <select id="editType_${idx}">${types.map(t => `<option${t === bet.type ? ' selected' : ''}>${t}</option>`).join('')}</select>
+                ${bet.numbers.map((n, j) => `<input type="number" min="1" max="49" value="${n}" id="editNum_${idx}_${j}">`).join('')}
+                <button class="bet-btn save" onclick="saveBetEdit(${idx}, ${bet.numbers.length})">&#10003;</button>
+                <button class="bet-btn" onclick="renderBetList()">&#10007;</button>
+            `;
+        };
+
+        window.saveBetEdit = function(idx, count) {
+            const newType = document.getElementById(`editType_${idx}`).value;
+            const newNums = [];
+            for (let j = 0; j < count; j++) {
+                const v = parseInt(document.getElementById(`editNum_${idx}_${j}`).value);
+                if (isNaN(v) || v < 1 || v > 49) { alert(`Number ${j+1} must be 1-49`); return; }
+                newNums.push(v);
+            }
+            extractedData.bets[idx] = { type: newType, numbers: newNums };
+            renderBetList();
+        };
+
+        window.deleteBet = function(idx) {
+            extractedData.bets.splice(idx, 1);
+            renderBetList();
+        };
+
+        function loadDrawIntoForm(draw) {
+            editingDrawId = draw.id;
+            extractedData = { draw_date: draw.draw_date, draw_number: draw.draw_number, bets: draw.bets || [] };
+            renderExtractedInfo();
+            renderBetList();
             $('saveDraw').style.display = 'inline-flex';
             $('deleteDraw').style.display = 'inline-flex';
             window.scrollTo({ top: 0, behavior: 'smooth' });
