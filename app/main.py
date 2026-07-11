@@ -437,6 +437,46 @@ async def fetch_missing_results():
     return {"message": f"Updated {updated} draw(s) with results", "updated": updated}
 
 
+@app.post("/regenerate-predictions/{draw_date}")
+async def regenerate_predictions(draw_date: str):
+    """Regenerate predictions for a specific draw and append to existing ones.
+
+    Finds the previous draw's winning numbers, generates new predictions,
+    and appends them to whatever predictions already exist for this draw.
+    """
+    from app.jobs.results import _next_draw_date
+
+    target = get_draw_by_date(draw_date)
+    if not target:
+        raise HTTPException(404, f"No draw found for {draw_date}")
+
+    # Find the previous draw by scanning all draws
+    all_draws = sorted(fetch_all_draws(), key=lambda d: d["draw_date"])
+    prev_draw = None
+    for d in all_draws:
+        if d["draw_date"] < draw_date and d.get("results") and d["results"].get("winning"):
+            prev_draw = d
+
+    if not prev_draw:
+        raise HTTPException(400, "No previous draw with results found to seed predictions")
+
+    last_winning = sorted(prev_draw["results"]["winning"])
+    logger.info(f"Regenerating predictions for {draw_date} using {prev_draw['draw_date']} winning: {last_winning}")
+
+    concentrated, diverse, low_skew, synthesis, total_passed = generate_all(last_winning)
+    new_predictions = [r.pick for group in (concentrated, diverse, low_skew, synthesis) for r in group]
+
+    existing_preds = target.get("predictions") or []
+    target["predictions"] = existing_preds + new_predictions
+    upsert_draw(target)
+
+    return {
+        "message": f"Appended {len(new_predictions)} predictions to {draw_date} (total: {len(target['predictions'])})",
+        "new": len(new_predictions),
+        "total": len(target["predictions"]),
+    }
+
+
 @app.post("/backfill-prizes")
 async def backfill_prizes():
     """Fetch prize data from Lottery Extreme for all draws missing it.

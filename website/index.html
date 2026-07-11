@@ -889,7 +889,10 @@
                                 ${(d.predictions||[]).length}P · ${(d.bets||[]).length}B · ${d.results && d.results.winning && d.results.winning.length ? '✓R' : '—R'}
                             </span>
                         </div>
-                        <button class="btn-outline-sm" data-draw-id="${d.id}">Edit</button>
+                        <div style="display:flex;gap:.4rem;">
+                            <button class="btn-outline-sm" data-repredict="${d.draw_date}">Re-predict</button>
+                            <button class="btn-outline-sm" data-draw-id="${d.id}">Edit</button>
+                        </div>
                     </div>
                 `).join('');
 
@@ -898,6 +901,23 @@
                     const draws = await fetchDraws();
                     const draw = draws.find(d => d.id === btn.dataset.drawId);
                     if (draw) loadDrawIntoForm(draw);
+                };
+            });
+            $('adminDrawList').querySelectorAll('[data-repredict]').forEach(btn => {
+                btn.onclick = async () => {
+                    const dd = btn.dataset.repredict;
+                    btn.textContent = '...';
+                    btn.disabled = true;
+                    try {
+                        const res = await fetch(`${API}/regenerate-predictions/${dd}`, { method: 'POST' });
+                        if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed'); }
+                        const data = await res.json();
+                        btn.textContent = `+${data.new}`;
+                        await renderAdminDrawList();
+                    } catch(e) {
+                        btn.textContent = 'Failed';
+                        setTimeout(() => { btn.textContent = 'Re-predict'; btn.disabled = false; }, 2000);
+                    }
                 };
             });
         }
