@@ -750,9 +750,10 @@
             // Merge into existing draw row if one exists for this date
             const allDraws = await fetchDraws();
             const existing = allDraws.find(d => d.draw_date === drawDate);
+            const mergedBets = existing ? [...(existing.bets || []), ...bets] : bets;
             const draw = existing
-                ? { ...existing, bets, draw_number: drawNumber || existing.draw_number || '' }
-                : { draw_date: drawDate, draw_number: drawNumber || '', predictions: [], bets, results: { winning: [], additional: null } };
+                ? { ...existing, bets: mergedBets, draw_number: drawNumber || existing.draw_number || '' }
+                : { draw_date: drawDate, draw_number: drawNumber || '', predictions: [], bets: mergedBets, results: { winning: [], additional: null } };
             if (editingDrawId) draw.id = editingDrawId;
             try {
                 await saveDraw(draw);
