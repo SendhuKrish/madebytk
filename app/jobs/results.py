@@ -3,13 +3,14 @@
 
 Schedule: Mon & Thu at 19:00 SGT (after the 6:30 PM draw).
 Retries hourly until ALL required data is available or deadline is reached.
+No partial saves — all three fields must be present.
 After results are saved, auto-generates predictions for the next draw.
 
 Source: Singapore Pools results page only (no fallbacks).
 Required before saving:
-  1. Current draw winning numbers
-  2. Current draw groupwise winning shares
-  3. Next draw jackpot amount (snowball or confirmed Group 1 winner)
+  1. Winning numbers (6 numbers)
+  2. Groupwise winning shares (Groups 1-7 with amounts and winner counts)
+  3. Group 1 Prize amount
 """
 
 import asyncio
@@ -51,24 +52,19 @@ def _results_complete(result: dict) -> tuple[bool, str]:
     """Check all three required data points are present.
 
     Returns (True, "") if complete, or (False, reason) if something is missing.
+    No partial saves — all three must be present.
     """
     # 1. Winning numbers
     if not result.get("winning") or len(result["winning"]) != 6:
         return False, "winning numbers"
 
-    # 2. Groupwise winning shares
+    # 2. Groupwise winning shares (Groups 1-7)
     if not result.get("prizes") or len(result["prizes"]) == 0:
         return False, "groupwise winning shares"
 
-    # 3. Next draw jackpot amount
-    g1 = next((p for p in result["prizes"] if p.get("group") == 1), None)
-    if not g1:
-        return False, "Group 1 prize data"
-
-    if g1.get("winners", 0) == 0:
-        # Group 1 not won — need snowball or group1_prize to set next jackpot
-        if not result.get("snowball_amount") and not result.get("group1_prize"):
-            return False, "next draw jackpot amount (snowball not yet available)"
+    # 3. Group 1 Prize amount
+    if not result.get("group1_prize"):
+        return False, "Group 1 Prize amount"
 
     return True, ""
 
@@ -153,20 +149,19 @@ def _save_results(today: str, result: dict) -> None:
         })
 
 
-async def _generate_next_predictions(today: str, result: dict) -> None:
-    """After results are in, immediately generate predictions for the next draw.
+async def generate_next_predictions(draw_date: str, winning: list[int], draw_number: str | None = None) -> None:
+    """Generate predictions for the next draw using the given winning numbers.
 
-    Passes winning numbers and draw info directly to predict_main so it doesn't
-    need to re-scrape external sites (which may lag behind SG Pools).
+    Called after results are saved — either by the cron job or by manual
+    endpoints. Passes data directly so we don't re-scrape external sites.
     """
     from app.jobs.predict import main as predict_main
 
-    winning = sorted(result["winning"])
-    draw_number = result.get("draw_number")
-    logger.info(f"Results saved — generating predictions for next draw using winning numbers {winning}")
+    winning = sorted(winning)
+    logger.info(f"Generating predictions for next draw using {draw_date} winning numbers {winning}")
     await predict_main(
         override_numbers=winning,
-        override_date=today,
+        override_date=draw_date,
         override_draw_number=draw_number,
     )
 
@@ -193,11 +188,11 @@ async def main():
 
         now = datetime.now(tz)
         if now.hour >= retry_until:
-            if result:
-                # Have partial results — save what we have rather than losing everything
-                logger.warning(f"Deadline reached with incomplete data — saving partial results")
-                break
-            logger.error(f"No results at all by {retry_until}:00 deadline. Giving up.")
+            logger.error(
+                f"Deadline reached ({retry_until}:00) with incomplete data"
+                f"{' — missing: ' + missing if result else ' — no results at all'}. "
+                f"Will retry on next scheduled run or manual trigger."
+            )
             sys.exit(1)
 
         logger.info(f"Retrying in {retry_interval} minutes (until {retry_until}:00 {settings.tz})...")
@@ -205,7 +200,7 @@ async def main():
 
     logger.info(f"Results: {result['winning']} +{result['additional']}")
     _save_results(today, result)
-    await _generate_next_predictions(today, result)
+    await generate_next_predictions(today, result["winning"], result.get("draw_number"))
     logger.info("Results cron complete")
 
 
