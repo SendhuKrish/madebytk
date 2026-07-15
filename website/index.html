@@ -504,10 +504,13 @@
 
                 // Jackpot badge logic
                 const g1Prize = draw.results && draw.results.group1_prize;
+                const g1FromPrizes = draw.results && draw.results.prizes
+                    && (draw.results.prizes.find(p => p.group === 1) || {}).amount;
+                const displayG1 = g1Prize || g1FromPrizes;
                 const estJackpot = draw.results && draw.results.estimated_jackpot;
                 let jackpotBadge = '';
-                if (hasResults && g1Prize) {
-                    jackpotBadge = `<span class="jackpot-badge prize">Grp1: $${g1Prize.toLocaleString()}</span>`;
+                if (hasResults && displayG1) {
+                    jackpotBadge = `<span class="jackpot-badge prize">Grp1: $${displayG1.toLocaleString()}</span>`;
                 } else if (!hasResults && estJackpot) {
                     jackpotBadge = `<span class="jackpot-badge est">Min $${estJackpot.toLocaleString()}</span>`;
                 }

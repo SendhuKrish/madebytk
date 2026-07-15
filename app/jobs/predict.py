@@ -38,31 +38,45 @@ def _next_draw_date(after: date) -> date:
     return after + timedelta(days=1)
 
 
-async def main():
+async def main(
+    override_numbers: list[int] | None = None,
+    override_date: str | None = None,
+    override_draw_number: str | None = None,
+):
+    """Generate predictions for the next draw.
+
+    When called from the results cron, override_* params are passed directly
+    so we don't need to re-scrape external sites (which may lag behind SG Pools).
+    When called standalone (scheduled cron), it scrapes as before.
+    """
     today = date.today()
     logger.info(f"Running prediction cron on {today.isoformat()}")
 
-    # 1. Fetch latest draw results to use as input
-    draw_data = await fetch_latest_draw()
-    if not draw_data:
-        logger.error("Could not fetch latest draw data. Aborting.")
-        sys.exit(1)
+    # 1. Get latest draw numbers — use override if provided, else scrape
+    if override_numbers:
+        last_draw = sorted(override_numbers)
+        draw_number_str = str(override_draw_number) if override_draw_number else None
+        next_draw_number = str(int(override_draw_number) + 1) if override_draw_number else None
+        last_draw_date_str = override_date
+        logger.info(f"Using override: last_draw={last_draw} (#{draw_number_str}) date={last_draw_date_str}")
+    else:
+        draw_data = await fetch_latest_draw()
+        if not draw_data:
+            logger.error("Could not fetch latest draw data. Aborting.")
+            sys.exit(1)
 
-    last_draw = sorted(draw_data["numbers"])
-    next_draw_number = None
-    if draw_data.get("draw_number"):
-        next_draw_number = str(int(draw_data["draw_number"]) + 1)
-
-    logger.info(f"Last draw: {last_draw} (#{draw_data.get('draw_number')})")
+        last_draw = sorted(draw_data["numbers"])
+        next_draw_number = None
+        if draw_data.get("draw_number"):
+            next_draw_number = str(int(draw_data["draw_number"]) + 1)
+        last_draw_date_str = draw_data.get("date")
+        logger.info(f"Last draw: {last_draw} (#{draw_data.get('draw_number')})")
 
     # 2. Determine the next draw date
-    # If the latest scraped draw is today, predictions are for the next draw day.
-    # If the latest scraped draw is in the past, predictions are for the next
-    # draw day after that date.
     last_draw_date = today
-    if draw_data.get("date"):
+    if last_draw_date_str:
         try:
-            last_draw_date = date.fromisoformat(draw_data["date"])
+            last_draw_date = date.fromisoformat(last_draw_date_str)
         except (ValueError, TypeError):
             pass
 

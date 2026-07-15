@@ -153,11 +153,22 @@ def _save_results(today: str, result: dict) -> None:
         })
 
 
-async def _generate_next_predictions(result: dict) -> None:
-    """After results are in, immediately generate predictions for the next draw."""
+async def _generate_next_predictions(today: str, result: dict) -> None:
+    """After results are in, immediately generate predictions for the next draw.
+
+    Passes winning numbers and draw info directly to predict_main so it doesn't
+    need to re-scrape external sites (which may lag behind SG Pools).
+    """
     from app.jobs.predict import main as predict_main
-    logger.info(f"Results saved — generating predictions for next draw using winning numbers {result['winning']}")
-    await predict_main()
+
+    winning = sorted(result["winning"])
+    draw_number = result.get("draw_number")
+    logger.info(f"Results saved — generating predictions for next draw using winning numbers {winning}")
+    await predict_main(
+        override_numbers=winning,
+        override_date=today,
+        override_draw_number=draw_number,
+    )
 
 
 async def main():
@@ -194,7 +205,7 @@ async def main():
 
     logger.info(f"Results: {result['winning']} +{result['additional']}")
     _save_results(today, result)
-    await _generate_next_predictions(result)
+    await _generate_next_predictions(today, result)
     logger.info("Results cron complete")
 
 
