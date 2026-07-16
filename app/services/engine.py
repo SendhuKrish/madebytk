@@ -56,6 +56,7 @@ class LearnedParams:
     hot_numbers: set[int] = field(
         default_factory=lambda: set(DEFAULT_HOT_NUMBERS)
     )
+    skew_direction: str = "low"  # "low" or "high" — which skew line to generate
     draws_used: int = 0
     recent_window: int = 0
 
@@ -110,15 +111,32 @@ def learn_parameters(
     if not hot:  # degenerate case: tiny window with no repeats
         hot = set(DEFAULT_HOT_NUMBERS)
 
+    # ── Skew direction (adaptive) ──
+    # Which extreme shape is the recent regime producing? A draw is
+    # "high-heavy" with 4+ numbers >= 25, "low-heavy" with 4+ <= 25.
+    # The skew line in standard mode follows the dominant direction;
+    # ties break on the recent average sum vs the theoretical 150.
+    high_heavy = sum(1 for d in recent if sum(1 for n in d if n >= 25) >= 4)
+    low_heavy = sum(1 for d in recent if sum(1 for n in d if n <= 25) >= 4)
+    if high_heavy > low_heavy:
+        skew_direction = "high"
+    elif low_heavy > high_heavy:
+        skew_direction = "low"
+    else:
+        avg_recent_sum = sum(sum(d) for d in recent) / len(recent)
+        skew_direction = "high" if avg_recent_sum > 150 else "low"
+
     params = LearnedParams(
         pos_averages=blended,
         hot_numbers=hot,
+        skew_direction=skew_direction,
         draws_used=len(valid),
         recent_window=len(recent),
     )
     logger.info(
         f"learn_parameters: {len(valid)} draws, recent={len(recent)}, "
-        f"pos_avg={blended}, hot={sorted(hot)}"
+        f"pos_avg={blended}, hot={sorted(hot)}, "
+        f"skew={skew_direction} (hi_heavy={high_heavy}, lo_heavy={low_heavy})"
     )
     return params
 
@@ -543,9 +561,17 @@ def generate_all(
     )
     used.update(n for line in diverse for n in line.pick)
 
-    low_skew = generate_low_skew(
-        last_draw, n_lines=1, exclude=used, seed=(seed or 0) + 1,
-    )
+    # Adaptive skew: direction follows the learned recent regime.
+    # Two 1L/5H draws in three (#4198, #4200) is exactly the shape a
+    # hardcoded low-skew line kept missing.
+    if params.skew_direction == "high":
+        low_skew = generate_high_skew(
+            last_draw, n_lines=1, exclude=used, seed=(seed or 0) + 1,
+        )
+    else:
+        low_skew = generate_low_skew(
+            last_draw, n_lines=1, exclude=used, seed=(seed or 0) + 1,
+        )
 
     # Synthesis: recombination of lines 1-5 ONLY, diverse from concentrated
     all_lines = list(conc_best) + list(diverse) + list(low_skew)

@@ -39,7 +39,7 @@ Azure VM (shared with getpally.ai — port 8000)
 │
 ├── Cron Jobs (Mon & Thu)
 │   ├── app/jobs/predict.py      → 08:00 SGT — generate predictions
-│   └── app/jobs/results.py      → 22:00 SGT — fetch results from SG Pools
+│   └── app/jobs/results.py      → 19:00 SGT — fetch results from SG Pools (retries hourly until 22:00)
 │
 ├── Nginx
 │   ├── getpally.ai              → proxy to port 8000 (existing, untouched)
@@ -71,12 +71,20 @@ docs/
     └── supabase_setup.sql   — Database schema
 ```
 
+## Hard Rules
+
+- **No hardcoding** — all config values (URLs, keys, thresholds, schedules) go in `.env` / config.py. Never inline them in code.
+- **Singapore Pools only for results** — `results.py` fetches exclusively from Singapore Pools. No fallback scrapers. If data is missing, retry hourly until available.
+- **All three fields required before saving results** — winning numbers, winning shares (Groups 1-7), AND Group 1 Prize amount. No partial saves. The cron retries until all are present or the deadline is reached.
+- **Predictions always triggered after results** — whenever results are saved (cron or manual endpoint), predictions for the next draw must be generated immediately. Use the `generate_next_predictions()` function in `results.py`.
+- **No disturbance to Pally** — separate nginx server block, separate port (8100), separate systemd service. Pally on port 8000 is completely untouched.
+
 ## Key Design Decisions
 
-- **No disturbance to Pally**: Separate nginx server block, separate port (8100), separate systemd service. Pally on port 8000 is completely untouched.
 - **Supabase for storage**: Same Supabase instance as Pally but different tables (`draws`, `settings`).
-- **Frontend calls `/api/draws`**: Nginx proxies `/api/*` to the FastAPI backend. Frontend falls back to direct Supabase reads if API is down.
+- **Frontend calls `/api/draws`**: Nginx proxies `/api/*` to the FastAPI backend.
 - **APScheduler (same as Pally)**: Jobs run in-process via APScheduler, so `docker compose up` is all you need — no host crontab setup required.
+- **Prediction after results uses override params** — when `results.py` triggers predictions, it passes winning numbers directly to `predict.py` via `override_*` params. This avoids re-scraping external sites that may lag behind SG Pools.
 
 ## Environment Variables
 

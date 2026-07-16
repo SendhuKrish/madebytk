@@ -27,7 +27,7 @@ from app.utils.models import (
 )
 from app.services.scraper import (
     fetch_latest_draw, fetch_lottolyzer_history, fetch_lottery_extreme_prizes,
-    fetch_sg_pools_results, fetch_sg_pools_results_by_date,
+    fetch_sg_pools_results, fetch_sg_pools_results_by_date, fetch_sglotto_g1prize,
 )
 from app.services.db import (
     delete_draw_by_id, fetch_all_draws, fetch_draws_without_results,
@@ -259,7 +259,7 @@ def _generate_predictions(
         strategies = [
             (concentrated, "concentrated"),
             (diverse, "diverse"),
-            (low_skew, "low_skew"),
+            (low_skew, f"{params.skew_direction}_skew"),
             (synthesis, "synthesis"),
         ]
 
@@ -407,8 +407,6 @@ async def remove_draw(draw_id: str):
 
 @app.post("/fetch-results")
 async def fetch_missing_results():
-    from app.jobs.results import generate_next_predictions
-
     draws = fetch_draws_without_results()
     if not draws:
         return {"message": "All draws already have results", "updated": 0}
@@ -421,82 +419,22 @@ async def fetch_missing_results():
     by_number = {r["draw_number"]: r for r in history if r.get("draw_number")}
 
     updated = 0
-    latest_completed = None
     for draw in draws:
         match = by_date.get(draw["draw_date"]) or by_number.get(draw.get("draw_number"))
         if match:
             draw["results"] = {"winning": match["winning"], "additional": match["additional"]}
             if match.get("draw_number") and not draw.get("draw_number"):
                 draw["draw_number"] = match["draw_number"]
-            # Fetch prizes + group1_prize from Singapore Pools
-            sg_data = await fetch_sg_pools_results_by_date(draw["draw_date"])
-            if sg_data:
-                if sg_data.get("prizes"):
-                    draw["results"]["prizes"] = sg_data["prizes"]
-                if sg_data.get("group1_prize"):
-                    draw["results"]["group1_prize"] = sg_data["group1_prize"]
-            else:
-                # Try lottery extreme for prizes if SG Pools unavailable
-                le_data = await fetch_lottery_extreme_prizes(draw["draw_date"])
-                if le_data and le_data.get("prizes"):
-                    draw["results"]["prizes"] = le_data["prizes"]
-                    draw["results"]["jackpot"] = le_data.get("jackpot")
+            # Also try to fetch prizes
+            le_data = await fetch_lottery_extreme_prizes(draw["draw_date"])
+            if le_data and le_data.get("prizes"):
+                draw["results"]["prizes"] = le_data["prizes"]
+                draw["results"]["jackpot"] = le_data.get("jackpot")
             upsert_draw(draw)
             updated += 1
-            latest_completed = draw
             await asyncio.sleep(0.5)
 
-    # Generate predictions for the next draw after the latest completed one
-    if latest_completed:
-        winning = latest_completed.get("results", {}).get("winning", [])
-        if len(winning) == 6:
-            await generate_next_predictions(
-                latest_completed["draw_date"],
-                winning,
-                latest_completed.get("draw_number"),
-            )
-
     return {"message": f"Updated {updated} draw(s) with results", "updated": updated}
-
-
-@app.post("/regenerate-predictions/{draw_date}")
-async def regenerate_predictions(draw_date: str):
-    """Regenerate predictions for a specific draw and append to existing ones.
-
-    Finds the previous draw's winning numbers, generates new predictions,
-    and appends them to whatever predictions already exist for this draw.
-    """
-    from app.jobs.results import _next_draw_date
-
-    target = get_draw_by_date(draw_date)
-    if not target:
-        raise HTTPException(404, f"No draw found for {draw_date}")
-
-    # Find the previous draw by scanning all draws
-    all_draws = sorted(fetch_all_draws(), key=lambda d: d["draw_date"])
-    prev_draw = None
-    for d in all_draws:
-        if d["draw_date"] < draw_date and d.get("results") and d["results"].get("winning"):
-            prev_draw = d
-
-    if not prev_draw:
-        raise HTTPException(400, "No previous draw with results found to seed predictions")
-
-    last_winning = sorted(prev_draw["results"]["winning"])
-    logger.info(f"Regenerating predictions for {draw_date} using {prev_draw['draw_date']} winning: {last_winning}")
-
-    concentrated, diverse, low_skew, synthesis, total_passed = generate_all(last_winning)
-    new_predictions = [r.pick for group in (concentrated, diverse, low_skew, synthesis) for r in group]
-
-    existing_preds = target.get("predictions") or []
-    target["predictions"] = existing_preds + new_predictions
-    upsert_draw(target)
-
-    return {
-        "message": f"Appended {len(new_predictions)} predictions to {draw_date} (total: {len(target['predictions'])})",
-        "new": len(new_predictions),
-        "total": len(target["predictions"]),
-    }
 
 
 @app.post("/backfill-prizes")
@@ -563,10 +501,11 @@ async def backfill_g1prize():
       1. Fetch all draws from DB that have winning numbers but no group1_prize
       2. For each, try SG Pools ASP.NET postback to get the Group 1 Prize
       3. When Group 1 Prize is found, also set estimated_jackpot on the next draw
-      4. Generate predictions for the next draw if not already present
+
+    Also always refreshes the latest draw from SG Pools to get snowball info.
     """
     import asyncio
-    from app.jobs.results import _next_draw_date, generate_next_predictions
+    from app.jobs.results import _next_draw_date
 
     all_draws = fetch_all_draws()
     updated = []
@@ -583,11 +522,10 @@ async def backfill_g1prize():
 
     logger.info(f"Backfill: {len(missing)} draws missing group1_prize")
 
-    latest_completed = None
     for draw in missing:
         draw_date = draw["draw_date"]
         try:
-            # Try SG Pools postback (full data)
+            # Try SG Pools postback first (full data), then sglottoresult (g1 only)
             g1_prize = None
             snowball = None
             source = None
@@ -602,6 +540,11 @@ async def backfill_g1prize():
                 if sg.get("prizes") and not results.get("prizes"):
                     results["prizes"] = sg["prizes"]
                     draw["results"] = results
+
+            if not g1_prize:
+                # Fallback: sglottoresult.com (Group 1 Prize only)
+                g1_prize = await fetch_sglotto_g1prize(draw_date)
+                source = "sglottoresult" if g1_prize else None
 
             if g1_prize:
                 results = draw.get("results") or {}
@@ -626,7 +569,6 @@ async def backfill_g1prize():
                     "group1_prize": g1_prize,
                     "source": source,
                 })
-                latest_completed = draw
                 logger.info(f"Backfilled {draw_date}: g1=${g1_prize:,} via {source}")
             else:
                 failed.append(draw_date)
@@ -638,20 +580,6 @@ async def backfill_g1prize():
         except Exception as e:
             failed.append(draw_date)
             logger.exception(f"Backfill failed for {draw_date}: {e}")
-
-    # Generate predictions for the next draw after the latest backfilled draw
-    if latest_completed:
-        winning = latest_completed.get("results", {}).get("winning", [])
-        if len(winning) == 6:
-            next_date = _next_draw_date(latest_completed["draw_date"])
-            next_draw = get_draw_by_date(next_date)
-            # Only generate if next draw has no predictions yet
-            if not next_draw or not next_draw.get("predictions"):
-                await generate_next_predictions(
-                    latest_completed["draw_date"],
-                    winning,
-                    latest_completed.get("draw_number"),
-                )
 
     return {
         "message": f"Updated {len(updated)} draws, {len(failed)} failed",
