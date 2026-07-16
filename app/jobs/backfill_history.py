@@ -34,12 +34,17 @@ HISTORY_URL = (
     "https://en.lottolyzer.com/history/singapore/toto"
     "/page/{page}/per-page/50/number-view"
 )
-DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-DRAWNO_RE = re.compile(r"^\d{3,5}$")
+DATE_RE = re.compile(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})")
+DRAW_SPLIT_RE = re.compile(r"Draw\s+(\d{3,5})")
+BALL_RE = re.compile(r"ball(\d{2})\.gif")
+
+_MONTHS = {m: i for i, m in enumerate(
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], start=1)}
 
 
 def fetch_page(page: int) -> list[dict]:
-    """Fetch and parse one history page → list of draw dicts."""
+    """Fetch and parse one history page -> list of draw dicts."""
     url = HISTORY_URL.format(page=page)
     logger.info(f"Fetching {url}")
     resp = httpx.get(
@@ -53,45 +58,47 @@ def fetch_page(page: int) -> list[dict]:
 
 
 def parse_history_html(html: str) -> list[dict]:
-    """Parse lottolyzer number-view table rows.
+    """Parse lottolyzer number-view history page.
 
-    Each row carries: draw number, date (YYYY-MM-DD), 6 winning numbers
-    (comma-separated in one cell), and the additional number.
+    Real structure (verified Jul 2026): each draw is a block of
+        Draw 4200
+        16 Jul 2026
+        <img src=".../ball06.gif" title="6"> x6, plus.gif, ball19.gif
+    Numbers live in ball-image FILENAMES, not table cells. We split the
+    raw HTML on "Draw NNNN" markers; within each chunk we read the date
+    ("DD Mon YYYY") and the first 7 ballNN.gif matches (6 winning +
+    1 additional).
     """
-    soup = BeautifulSoup(html, "html.parser")
     draws = []
+    parts = DRAW_SPLIT_RE.split(html)
+    # parts = [preamble, drawno1, chunk1, drawno2, chunk2, ...]
+    for i in range(1, len(parts) - 1, 2):
+        draw_number = parts[i]
+        chunk = parts[i + 1]
 
-    for tr in soup.find_all("tr"):
-        cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
-        if len(cells) < 3:
+        dm = DATE_RE.search(chunk)
+        if not dm:
+            continue
+        day, mon, year = dm.groups()
+        month = _MONTHS.get(mon.title())
+        if not month:
+            continue
+        date_str = f"{year}-{month:02d}-{int(day):02d}"
+
+        balls = [int(b) for b in BALL_RE.findall(chunk)][:7]
+        balls = [b for b in balls if 1 <= b <= 49]
+        if len(balls) < 6:
             continue
 
-        date_str = next((c for c in cells if DATE_RE.fullmatch(c)), None)
-        if not date_str:
-            continue
-
-        draw_number = next((c for c in cells if DRAWNO_RE.fullmatch(c)), None)
-
-        winning: list[int] | None = None
-        additional: int | None = None
-        for c in cells:
-            parts = [p for p in re.split(r"[,\s]+", c) if p.isdigit()]
-            nums = [int(p) for p in parts]
-            if len(nums) == 6 and all(1 <= n <= 49 for n in nums):
-                winning = sorted(nums)
-            elif winning is not None and additional is None and len(nums) == 1 \
-                    and 1 <= nums[0] <= 49:
-                additional = nums[0]
-
-        if winning:
-            draws.append({
-                "draw_date": date_str,
-                "draw_number": draw_number,
-                "winning": winning,
-                "additional": additional,
-            })
+        draws.append({
+            "draw_date": date_str,
+            "draw_number": draw_number,
+            "winning": sorted(balls[:6]),
+            "additional": balls[6] if len(balls) >= 7 else None,
+        })
 
     return draws
+
 
 
 def backfill(pages: int, dry_run: bool) -> None:
