@@ -467,10 +467,12 @@
         }
 
         /* ── RENDER PUBLIC ── */
+        const PUBLIC_DRAWS_CUTOFF = '2026-06-18';
+
         async function renderPublicDraws() {
             const container = $('drawList');
             container.innerHTML = '<div class="loading-bar"><span class="spinner"></span> Loading draws...</div>';
-            const draws = await fetchDraws();
+            const draws = (await fetchDraws()).filter(d => d.draw_date >= PUBLIC_DRAWS_CUTOFF);
 
             if (draws.length === 0) {
                 container.innerHTML = '<div class="empty-state"><p>No draws yet.</p></div>';
