@@ -21,14 +21,14 @@ uvicorn app.main:app --reload --port 8100
 python -m app.jobs.predict
 python -m app.jobs.results
 
-# Deploy to Azure VM (nice = low priority so Pally isn't affected)
-cd ~/toto && git pull && nice -n 19 docker compose build && docker compose up -d
+# Deploy to Azure VM
+cd ~/toto && git pull && docker compose build && docker compose up -d
 ```
 
 ## Architecture
 
 ```
-Azure VM (shared with getpally.ai — port 8000)
+Azure VM (dedicated — separate from Pally's VM)
 │
 ├── Toto Engine (FastAPI)        → port 8100
 │   ├── GET  /draws              → all draws from Supabase (descending)
@@ -42,7 +42,6 @@ Azure VM (shared with getpally.ai — port 8000)
 │   └── app/jobs/results.py      → 19:00 SGT — fetch results from SG Pools (retries hourly until 22:00)
 │
 ├── Nginx
-│   ├── getpally.ai              → proxy to port 8000 (existing, untouched)
 │   └── madebytk.com             → website/ static + /api/ proxy to port 8100
 │
 └── Supabase (external DB)
@@ -77,13 +76,13 @@ docs/
 - **Singapore Pools only for results** — `results.py` fetches exclusively from Singapore Pools. No fallback scrapers. If data is missing, retry hourly until available.
 - **All three fields required before saving results** — winning numbers, winning shares (Groups 1-7), AND Group 1 Prize amount. No partial saves. The cron retries until all are present or the deadline is reached.
 - **Predictions always triggered after results** — whenever results are saved (cron or manual endpoint), predictions for the next draw must be generated immediately. Use the `generate_next_predictions()` function in `results.py`.
-- **No disturbance to Pally** — separate nginx server block, separate port (8100), separate systemd service. Pally on port 8000 is completely untouched.
+- **No disturbance to Pally** — MadeByTK runs on its own dedicated Azure VM, entirely separate from Pally's VM.
 
 ## Key Design Decisions
 
 - **Supabase for storage**: Same Supabase instance as Pally but different tables (`draws`, `settings`).
 - **Frontend calls `/api/draws`**: Nginx proxies `/api/*` to the FastAPI backend.
-- **APScheduler (same as Pally)**: Jobs run in-process via APScheduler, so `docker compose up` is all you need — no host crontab setup required.
+- **APScheduler**: Jobs run in-process via APScheduler, so `docker compose up` is all you need — no host crontab setup required.
 - **Prediction after results uses override params** — when `results.py` triggers predictions, it passes winning numbers directly to `predict.py` via `override_*` params. This avoids re-scraping external sites that may lag behind SG Pools.
 
 ## Environment Variables
