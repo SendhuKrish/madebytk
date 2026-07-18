@@ -5,16 +5,6 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-class DrawInput(BaseModel):
-    """Manual draw input."""
-    numbers: list[int] = Field(
-        ...,
-        min_length=6,
-        max_length=6,
-        description="6 numbers between 1-49",
-    )
-
-
 class PickLine(BaseModel):
     """A single predicted line."""
     line_number: int

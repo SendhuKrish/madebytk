@@ -31,8 +31,9 @@ from app.services.scraper import (
 )
 from app.services.db import (
     delete_draw_by_id, fetch_all_draws, fetch_draws_without_results,
-    get_draw_by_date, sign_in_user, upsert_draw,
+    fetch_history, get_draw_by_date, sign_in_user, upsert_draw,
 )
+from app.jobs.backfill_prizes import backfill_prizes as run_backfill_prizes
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("toto-api")
@@ -153,27 +154,6 @@ class LoginRequest(BaseModel):
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def extract_history(max_draws: int = 100) -> list[list[int]]:
-    """Pull winning numbers from Supabase draws, newest first.
-
-    Used by the v4 self-learning engine to compute POS_AVERAGES and
-    HOT_NUMBERS at prediction time. Skips draws without results
-    (future/pending draws). Bonus number is excluded.
-    """
-    history = []
-    try:
-        for d in fetch_all_draws():
-            results = d.get("results") or {}
-            winning = results.get("winning") or []
-            if len(winning) == 6:
-                history.append(sorted(int(n) for n in winning))
-            if len(history) >= max_draws:
-                break
-    except Exception:
-        logger.exception("extract_history failed — engine will use defaults")
-    return history
-
-
 def _validate_draw(numbers: list[int]) -> None:
     if len(numbers) != 6:
         raise HTTPException(400, "Exactly 6 numbers required")
@@ -233,7 +213,7 @@ def _generate_predictions(
     )
 
     # V4: learn weights from draw history (auto-adapts every prediction)
-    history = extract_history()
+    history = fetch_history()
     params = learn_parameters(history)
     logger.info(
         f"V4 learned params: draws={params.draws_used} "
@@ -443,54 +423,12 @@ async def backfill_prizes():
 
     Also corrects winning numbers if they differ from Lottery Extreme.
     """
-    draws = fetch_all_draws()
-    updated = 0
-    failed = 0
-
-    for draw in draws:
-        draw_date = draw.get("draw_date")
-        results = draw.get("results") or {}
-        has_winning = results.get("winning") and len(results.get("winning", [])) > 0
-        has_prizes = results.get("prizes") and len(results.get("prizes", [])) > 0
-
-        if not has_winning or has_prizes:
-            continue
-
-        le_data = await fetch_lottery_extreme_prizes(draw_date)
-        if not le_data:
-            failed += 1
-            continue
-
-        changed = False
-
-        if le_data.get("prizes"):
-            results["prizes"] = le_data["prizes"]
-            results["jackpot"] = le_data.get("jackpot")
-            changed = True
-
-        # Correct winning numbers if they differ
-        if le_data.get("numbers"):
-            le_winning = sorted(le_data["numbers"])
-            current_winning = sorted(results.get("winning", []))
-            if le_winning != current_winning:
-                results["winning"] = le_winning
-                changed = True
-            if le_data.get("bonus") and le_data["bonus"] != results.get("additional"):
-                results["additional"] = le_data["bonus"]
-                changed = True
-
-        if le_data.get("draw_number") and not draw.get("draw_number"):
-            draw["draw_number"] = str(le_data["draw_number"])
-            changed = True
-
-        if changed:
-            draw["results"] = results
-            upsert_draw(draw)
-            updated += 1
-
-        await asyncio.sleep(0.5)
-
-    return {"message": f"Backfilled {updated} draw(s) with prizes ({failed} failed)", "updated": updated, "failed": failed}
+    stats = await run_backfill_prizes()
+    return {
+        "message": f"Backfilled {stats['updated']} draw(s) with prizes ({stats['failed']} failed)",
+        "updated": stats["updated"],
+        "failed": stats["failed"],
+    }
 
 
 @app.post("/backfill-g1prize")

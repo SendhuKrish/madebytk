@@ -13,8 +13,8 @@ from datetime import date, timedelta
 from app.services.engine import generate_all
 from app.services.scraper import fetch_latest_draw
 from app.services.db import (
-    fetch_all_draws,
     fetch_draws_without_results,
+    fetch_history,
     get_draw_by_date,
     upsert_draw,
 )
@@ -41,24 +41,6 @@ def _next_draw_date(after: date) -> date:
             return candidate
     # Fallback: shouldn't happen with valid config
     return after + timedelta(days=1)
-
-
-def _extract_history(max_draws: int = 100) -> list[list[int]]:
-    """Pull winning numbers from Supabase, newest first, for v4 learning.
-
-    Skips rows without 6 winning numbers (pending draws).
-    """
-    history = []
-    try:
-        for d in fetch_all_draws():
-            winning = (d.get("results") or {}).get("winning") or []
-            if len(winning) == 6:
-                history.append(sorted(int(n) for n in winning))
-            if len(history) >= max_draws:
-                break
-    except Exception:
-        logger.exception("_extract_history failed — engine will use defaults")
-    return history
 
 
 async def main(
@@ -123,7 +105,7 @@ async def main(
         return
 
     # 3. Generate predictions (v4: learn weights from full draw history)
-    history = _extract_history()
+    history = fetch_history()
     logger.info(f"Learning from {len(history)} historical draws")
     concentrated, diverse, low_skew, synthesis, total_passed = generate_all(
         last_draw, history=history,
