@@ -1,7 +1,11 @@
 """Supabase client wrapper for Toto Engine."""
 
+import logging
+
 from supabase import create_client, Client
 from app.utils.config import settings
+
+logger = logging.getLogger("toto-db")
 
 _client: Client | None = None
 
@@ -33,18 +37,6 @@ def upsert_draw(draw: dict) -> dict:
     return resp.data[0] if resp.data else {}
 
 
-def get_draw_by_number(draw_number: str) -> dict | None:
-    """Get a draw by draw_number."""
-    resp = (
-        get_client()
-        .table("draws")
-        .select("*")
-        .eq("draw_number", draw_number)
-        .execute()
-    )
-    return resp.data[0] if resp.data else None
-
-
 def fetch_draws_without_results() -> list[dict]:
     """Fetch draws that have no winning numbers."""
     all_draws = fetch_all_draws()
@@ -70,6 +62,26 @@ def get_draw_by_date(draw_date: str) -> dict | None:
         .execute()
     )
     return resp.data[0] if resp.data else None
+
+
+def fetch_history(max_draws: int = 100) -> list[list[int]]:
+    """Pull winning numbers from Supabase draws, newest first.
+
+    Used by the v4 self-learning engine to compute POS_AVERAGES and
+    HOT_NUMBERS at prediction time. Skips draws without results
+    (future/pending draws). Bonus number is excluded.
+    """
+    history = []
+    try:
+        for d in fetch_all_draws():
+            winning = (d.get("results") or {}).get("winning") or []
+            if len(winning) == 6:
+                history.append(sorted(int(n) for n in winning))
+            if len(history) >= max_draws:
+                break
+    except Exception:
+        logger.exception("fetch_history failed — engine will use defaults")
+    return history
 
 
 def sign_in_user(email: str, password: str) -> dict:

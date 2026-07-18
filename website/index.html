@@ -537,8 +537,8 @@
                     <div class="draw-body">
                         ${(hasPreds || hasBets) ? `
                         <div class="draw-columns">
-                            ${hasPreds ? renderPredCol(draw) : ''}
-                            ${hasBets ? renderBetsCol(draw) : ''}
+                            ${hasPreds ? renderLineCol('Predictions', draw.predictions || [], set => set, hasResults, hasResults ? draw.results.winning : [], hasResults ? draw.results.additional : null) : ''}
+                            ${hasBets ? renderLineCol('Bets', draw.bets || [], bet => bet.numbers, hasResults, hasResults ? draw.results.winning : [], hasResults ? draw.results.additional : null) : ''}
                             ${hasResults ? renderResultsCol(draw) : ''}
                         </div>` : '<p class="no-data">No predictions or bets for this draw.</p>'}
                     </div>
@@ -546,61 +546,12 @@
             }).join('');
         }
 
-        function renderPrizeSection(draw) {
-            const results = draw.results;
-            if (!results || !results.prizes || results.prizes.length === 0) return '';
-            const jackpot = results.jackpot;
-            return `<div class="prize-section">
-                <h4>Winning Shares</h4>
-                ${jackpot ? `<div class="prize-jackpot">Group 1 Prize: $${jackpot.toLocaleString()}</div>` : ''}
-                <table class="prize-table">
-                    <tr><th>Group</th><th>Share Amount</th><th>Winners</th></tr>
-                    ${results.prizes.map(p => `<tr>
-                        <td>${p.group}</td>
-                        <td>${p.amount > 0 ? '$' + p.amount.toLocaleString() : '—'}</td>
-                        <td>${p.winners > 0 ? p.winners.toLocaleString() : '—'}</td>
-                    </tr>`).join('')}
-                </table>
-            </div>`;
-        }
-
-        function renderPredCol(draw) {
-            const preds = draw.predictions || [];
-            const hasResults = draw.results && draw.results.winning && draw.results.winning.length > 0;
-            const winning = hasResults ? draw.results.winning : [];
-            const additional = hasResults ? draw.results.additional : null;
-
+        function renderLineCol(title, items, numbersOf, hasResults, winning, additional) {
             return `<div class="draw-col">
-                <h4>Predictions (${preds.length})</h4>
-                ${preds.map((set, idx) => {
+                <h4>${title} (${items.length})</h4>
+                ${items.map((item, idx) => {
                     let matchCount = 0;
-                    const balls = set.map(n => {
-                        let cls = 'ball';
-                        if (winning.includes(n)) { cls += ' match'; matchCount++; }
-                        else if (n === additional) { cls += ' bonus-match'; }
-                        else if (hasResults && isNear(n, winning)) { cls += ' near'; }
-                        return `<span class="${cls}">${pad(n)}</span>`;
-                    }).join('');
-                    return `<div class="line-row">
-                        <span class="line-num">${idx + 1}</span>
-                        <div class="line-balls">${balls}</div>
-                        ${hasResults ? `<span class="line-match">${matchCount > 0 ? matchCount : '—'}</span>` : ''}
-                    </div>`;
-                }).join('')}
-            </div>`;
-        }
-
-        function renderBetsCol(draw) {
-            const bets = draw.bets || [];
-            const hasResults = draw.results && draw.results.winning && draw.results.winning.length > 0;
-            const winning = hasResults ? draw.results.winning : [];
-            const additional = hasResults ? draw.results.additional : null;
-
-            return `<div class="draw-col">
-                <h4>Bets (${bets.length})</h4>
-                ${bets.map((bet, idx) => {
-                    let matchCount = 0;
-                    const balls = bet.numbers.map(n => {
+                    const balls = numbersOf(item).map(n => {
                         let cls = 'ball';
                         if (winning.includes(n)) { cls += ' match'; matchCount++; }
                         else if (n === additional) { cls += ' bonus-match'; }

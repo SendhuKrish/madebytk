@@ -398,50 +398,21 @@ def generate_diverse(
     return lines, total_passed
 
 
-def generate_low_skew(
+def generate_skew(
     last_draw: list[int],
+    direction: str,
     n_lines: int = 1,
     exclude: set[int] | None = None,
     seed: int | None = None,
     n_candidates: int = CANDIDATE_COUNT,
 ) -> list[ScoredPick]:
-    """Generate low-skew lines (5+ numbers <= 25)."""
-    if seed is not None:
-        random.seed(seed)
+    """Generate skewed lines (5+ numbers on one side of the pool).
 
-    candidates = []
-    for _ in range(n_candidates):
-        pick = sorted(random.sample(POOL, 6))
-        result = score_filter(pick, last_draw)
-        if result.low_count >= 5 and result.filter_score >= MIN_SKEW_SCORE:
-            candidates.append(result)
-
-    candidates.sort(key=lambda x: (-x.filter_score, -x.nb3))
-
-    used = set(exclude) if exclude else set()
-    lines = []
-    for c in candidates:
-        if len(lines) >= n_lines:
-            break
-        overlap = sum(1 for n in c.pick if n in used)
-        if overlap <= 2:
-            lines.append(c)
-            used.update(c.pick)
-
-    return lines
-
-
-def generate_high_skew(
-    last_draw: list[int],
-    n_lines: int = 1,
-    exclude: set[int] | None = None,
-    seed: int | None = None,
-    n_candidates: int = CANDIDATE_COUNT,
-) -> list[ScoredPick]:
-    """Generate high-skew lines (5+ numbers >= 25).
-
-    Mirror of low-skew: catches draws like #4198 [23,27,31,38,42,47]
-    where the draw packs into the upper half with one low outlier.
+    direction="low": 5+ numbers <= 25 (reuses score_filter's low_count).
+    direction="high": 5+ numbers >= 25 (catches draws like #4198
+    [23,27,31,38,42,47] that pack into the upper half with one low
+    outlier). Note 25 satisfies both bounds, so high_count is computed
+    independently rather than as `6 - low_count`.
     """
     if seed is not None:
         random.seed(seed)
@@ -450,8 +421,11 @@ def generate_high_skew(
     for _ in range(n_candidates):
         pick = sorted(random.sample(POOL, 6))
         result = score_filter(pick, last_draw)
-        high_count = sum(1 for n in pick if n >= 25)
-        if high_count >= 5 and result.filter_score >= MIN_SKEW_SCORE:
+        if direction == "low":
+            skew_count = result.low_count
+        else:
+            skew_count = sum(1 for n in pick if n >= 25)
+        if skew_count >= 5 and result.filter_score >= MIN_SKEW_SCORE:
             candidates.append(result)
 
     candidates.sort(key=lambda x: (-x.filter_score, -x.nb3))
@@ -564,14 +538,10 @@ def generate_all(
     # Adaptive skew: direction follows the learned recent regime.
     # Two 1L/5H draws in three (#4198, #4200) is exactly the shape a
     # hardcoded low-skew line kept missing.
-    if params.skew_direction == "high":
-        low_skew = generate_high_skew(
-            last_draw, n_lines=1, exclude=used, seed=(seed or 0) + 1,
-        )
-    else:
-        low_skew = generate_low_skew(
-            last_draw, n_lines=1, exclude=used, seed=(seed or 0) + 1,
-        )
+    low_skew = generate_skew(
+        last_draw, direction=params.skew_direction, n_lines=1,
+        exclude=used, seed=(seed or 0) + 1,
+    )
 
     # Synthesis: recombination of lines 1-5 ONLY, diverse from concentrated
     all_lines = list(conc_best) + list(diverse) + list(low_skew)
@@ -641,12 +611,12 @@ def generate_jackpot(
         wave_idx += 1
 
     # 3. Low-skew + 4. High-skew
-    low_skew = dedupe(generate_low_skew(
-        last_draw, n_lines=n_skew_lo, seed=(seed or 0) + 1,
+    low_skew = dedupe(generate_skew(
+        last_draw, direction="low", n_lines=n_skew_lo, seed=(seed or 0) + 1,
         n_candidates=150_000,
     ))
-    high_skew = dedupe(generate_high_skew(
-        last_draw, n_lines=n_skew_hi, seed=(seed or 0) + 2,
+    high_skew = dedupe(generate_skew(
+        last_draw, direction="high", n_lines=n_skew_hi, seed=(seed or 0) + 2,
         n_candidates=150_000,
     ))
 

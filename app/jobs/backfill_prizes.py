@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-off script: Backfill prize data for all draws from Lottery Extreme.
+"""Backfill prize data for all draws from Lottery Extreme.
 
 Usage:
     python -m app.jobs.backfill_prizes          # backfill all draws missing prizes
@@ -8,6 +8,8 @@ Usage:
 Fetches prize breakdown (group, amount, winners) from Lottery Extreme's
 winners page for each draw that has results but no prize data.
 Also corrects winning numbers if they differ from Lottery Extreme.
+
+Shared by the CLI above and the POST /backfill-prizes endpoint in main.py.
 """
 
 import asyncio
@@ -21,9 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger("backfill-prizes")
 
 
-async def main():
-    force_all = "--all" in sys.argv
-
+async def backfill_prizes(force_all: bool = False) -> dict:
     draws = fetch_all_draws()
     logger.info(f"Found {len(draws)} total draws in database")
 
@@ -47,7 +47,6 @@ async def main():
             skipped += 1
             continue
 
-        # Fetch from lottery extreme winners page
         logger.info(f"{draw_date}: fetching prize data...")
         le_data = await fetch_lottery_extreme_prizes(draw_date)
 
@@ -56,7 +55,6 @@ async def main():
             failed += 1
             continue
 
-        # Update results with prize data
         changed = False
 
         if le_data.get("prizes"):
@@ -102,6 +100,12 @@ async def main():
         await asyncio.sleep(0.5)
 
     logger.info(f"Done: {updated} updated, {skipped} skipped, {failed} failed")
+    return {"updated": updated, "skipped": skipped, "failed": failed}
+
+
+async def main():
+    force_all = "--all" in sys.argv
+    await backfill_prizes(force_all=force_all)
 
 
 if __name__ == "__main__":
