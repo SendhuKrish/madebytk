@@ -10,7 +10,7 @@ import logging
 import sys
 from datetime import date
 
-from app.jobs.scheduling import next_draw_date
+from app.jobs.scheduling import next_draw_info
 from app.services.engine import generate_all
 from app.services.scraper import fetch_latest_draw
 from app.services.db import (
@@ -69,8 +69,9 @@ async def main(
         except (ValueError, TypeError):
             pass
 
-    target_date = await next_draw_date(last_draw_date)
-    target_date_str = target_date.isoformat()
+    info = await next_draw_info(last_draw_date)
+    target_date_str = info["date"].isoformat()
+    jackpot_est = info["jackpot_est"]
     logger.info(f"Predictions target draw date: {target_date_str}")
 
     # Guard: don't skip ahead if an earlier draw still has no results.
@@ -106,15 +107,22 @@ async def main(
         existing["predictions"] = predictions
         if next_draw_number and not existing.get("draw_number"):
             existing["draw_number"] = next_draw_number
+        if jackpot_est is not None:
+            results = existing.get("results") or {}
+            results["estimated_jackpot"] = jackpot_est
+            existing["results"] = results
         upsert_draw(existing)
         logger.info(f"Updated existing draw record for {target_date_str}")
     else:
+        results_data = {"winning": [], "additional": None}
+        if jackpot_est is not None:
+            results_data["estimated_jackpot"] = jackpot_est
         draw_record = {
             "draw_date": target_date_str,
             "draw_number": next_draw_number or "",
             "predictions": predictions,
             "bets": [],
-            "results": {"winning": [], "additional": None},
+            "results": results_data,
         }
         upsert_draw(draw_record)
         logger.info(f"Created new draw record for {target_date_str}")
