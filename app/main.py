@@ -443,7 +443,8 @@ async def backfill_g1prize():
     Also always refreshes the latest draw from SG Pools to get snowball info.
     """
     import asyncio
-    from app.jobs.results import _next_draw_date
+    from datetime import date as _date
+    from app.jobs.scheduling import calendar_next_draw_date
 
     all_draws = fetch_all_draws()
     updated = []
@@ -491,7 +492,7 @@ async def backfill_g1prize():
                 upsert_draw(draw)
 
                 # Set estimated_jackpot on next draw
-                next_date = _next_draw_date(draw_date)
+                next_date = calendar_next_draw_date(_date.fromisoformat(draw_date)).isoformat()
                 next_draw = get_draw_by_date(next_date)
                 estimated = snowball if snowball else 1_000_000
 

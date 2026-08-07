@@ -20,7 +20,7 @@ from datetime import date, datetime
 
 import pytz
 
-from app.jobs.scheduling import next_draw_date
+from app.jobs.scheduling import next_draw_info
 from app.services.db import get_draw_by_date, upsert_draw
 from app.services.scraper import fetch_sg_pools_results
 from app.utils.config import settings
@@ -70,7 +70,7 @@ def _results_complete(result: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _save_results(today: str, result: dict) -> None:
+async def _save_results(today: str, result: dict) -> None:
     """Save results into the draw record for today."""
     existing = get_draw_by_date(today)
 
@@ -97,25 +97,28 @@ def _save_results(today: str, result: dict) -> None:
         })
         logger.info(f"Created new draw record with results for {today}")
 
-    # ── Set estimated jackpot on the next draw ──
-    next_date = next_draw_date(date.fromisoformat(today)).isoformat()
+    # ── Set next draw date + estimated jackpot — live feed first ──
+    info = await next_draw_info(date.fromisoformat(today))
+    next_date = info["date"].isoformat()
     next_draw = get_draw_by_date(next_date)
 
-    snowball = result.get("snowball_amount")
-    group1_prize = result.get("group1_prize")
-    prizes = result.get("prizes", [])
-    g1 = next((p for p in prizes if p.get("group") == 1), None)
-
-    if snowball:
-        estimated = snowball
-        logger.info(f"Snowball: ${snowball:,} -> estimated_jackpot on {next_date}")
-    elif g1 and g1.get("winners", 0) == 0 and group1_prize:
-        # Group 1 not won, no explicit snowball text — use group1_prize
-        estimated = group1_prize
-        logger.info(f"Group 1 not won: ${group1_prize:,} -> estimated_jackpot on {next_date}")
+    if info["jackpot_est"] is not None:
+        estimated = info["jackpot_est"]
+        logger.info(f"Next draw jackpot (live): ${estimated:,} on {next_date}")
     else:
-        # Group 1 was won — next draw starts at minimum $1,000,000
-        estimated = 1_000_000
+        # Live feed unavailable — estimate from today's snowball/group1 text
+        snowball = result.get("snowball_amount")
+        group1_prize = result.get("group1_prize")
+        prizes = result.get("prizes", [])
+        g1 = next((p for p in prizes if p.get("group") == 1), None)
+
+        if snowball:
+            estimated = snowball
+        elif g1 and g1.get("winners", 0) == 0 and group1_prize:
+            estimated = group1_prize
+        else:
+            estimated = 1_000_000
+        logger.info(f"Next draw jackpot (estimated, live unavailable): ${estimated:,} on {next_date}")
 
     if next_draw:
         next_results = next_draw.get("results") or {}
@@ -181,7 +184,7 @@ async def main():
         await asyncio.sleep(retry_interval * 60)
 
     logger.info(f"Results: {result['winning']} +{result['additional']}")
-    _save_results(today, result)
+    await _save_results(today, result)
     await generate_next_predictions(today, result["winning"], result.get("draw_number"))
     logger.info("Results cron complete")
 

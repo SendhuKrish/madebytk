@@ -668,6 +668,46 @@ async def fetch_sglotto_g1prize(draw_date: str) -> int | None:
     return None
 
 
+async def fetch_next_draw() -> dict | None:
+    """Fetch the real next scheduled draw date + estimated jackpot.
+
+    This is the small data fragment the results page itself loads via AJAX
+    (network tab: toto_next_draw_estimate_en.html) — it reflects one-off
+    postponements (e.g. draw shifted for a public holiday) that plain
+    mon/thu calendar math can't know about.
+
+    Returns {"date": "YYYY-MM-DD", "jackpot_est": int|None} or None.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.get(settings.toto_next_draw_url, headers=HEADERS)
+            resp.raise_for_status()
+
+        text = re.sub(r"\s+", " ", resp.text)
+        date_match = re.search(
+            r"(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})",
+            text, re.IGNORECASE,
+        )
+        if not date_match:
+            logger.warning("Next-draw fetch: no date found in response")
+            return None
+        next_date = datetime.strptime(
+            f"{date_match.group(1)} {date_match.group(2)} {date_match.group(3)}",
+            "%d %b %Y",
+        ).strftime("%Y-%m-%d")
+
+        jackpot_match = re.search(r"\$([\d,]+)", text)
+        jackpot_est = int(jackpot_match.group(1).replace(",", "")) if jackpot_match else None
+
+        logger.info(f"Next draw: {next_date} (est ${jackpot_est:,})" if jackpot_est else f"Next draw: {next_date}")
+        return {"date": next_date, "jackpot_est": jackpot_est}
+
+    except Exception:
+        logger.exception("Next-draw fetch failed")
+
+    return None
+
+
 async def fetch_lottolyzer_history(pages: int = 1) -> list[dict]:
     """Fetch multiple draws from lottolyzer.com history page.
 

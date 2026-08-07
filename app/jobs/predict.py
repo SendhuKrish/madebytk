@@ -69,7 +69,7 @@ async def main(
         except (ValueError, TypeError):
             pass
 
-    target_date = next_draw_date(last_draw_date)
+    target_date = await next_draw_date(last_draw_date)
     target_date_str = target_date.isoformat()
     logger.info(f"Predictions target draw date: {target_date_str}")
 
