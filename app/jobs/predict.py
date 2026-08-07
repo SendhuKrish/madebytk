@@ -8,8 +8,9 @@ Also triggered automatically after results are fetched.
 import asyncio
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date
 
+from app.jobs.scheduling import next_draw_date
 from app.services.engine import generate_all
 from app.services.scraper import fetch_latest_draw
 from app.services.db import (
@@ -18,29 +19,12 @@ from app.services.db import (
     get_draw_by_date,
     upsert_draw,
 )
-from app.utils.config import settings
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger("cron-predict")
-
-# Map day abbreviations to weekday numbers (mon=0 ... sun=6)
-_DAY_MAP = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
-
-
-def _next_draw_date(after: date) -> date:
-    """Calculate the next draw date strictly after `after`, based on PREDICT_DAYS."""
-    draw_weekdays = sorted(
-        _DAY_MAP[d.strip().lower()] for d in settings.predict_days.split(",")
-    )
-    for offset in range(1, 8):
-        candidate = after + timedelta(days=offset)
-        if candidate.weekday() in draw_weekdays:
-            return candidate
-    # Fallback: shouldn't happen with valid config
-    return after + timedelta(days=1)
 
 
 async def main(
@@ -85,7 +69,7 @@ async def main(
         except (ValueError, TypeError):
             pass
 
-    target_date = _next_draw_date(last_draw_date)
+    target_date = next_draw_date(last_draw_date)
     target_date_str = target_date.isoformat()
     logger.info(f"Predictions target draw date: {target_date_str}")
 

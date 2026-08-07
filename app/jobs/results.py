@@ -16,10 +16,11 @@ Required before saving:
 import asyncio
 import logging
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import pytz
 
+from app.jobs.scheduling import next_draw_date
 from app.services.db import get_draw_by_date, upsert_draw
 from app.services.scraper import fetch_sg_pools_results
 from app.utils.config import settings
@@ -69,25 +70,6 @@ def _results_complete(result: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def _next_draw_date(draw_date_str: str) -> str:
-    """Get the next Toto draw date (Mon/Thu) after the given date."""
-    dt = datetime.strptime(draw_date_str, "%Y-%m-%d")
-    weekday = dt.weekday()  # 0=Mon, 3=Thu
-    if weekday == 0:    # Monday -> Thursday
-        delta = 3
-    elif weekday == 3:  # Thursday -> Monday
-        delta = 4
-    else:
-        # Off-schedule draw: find next Mon or Thu
-        delta = 1
-        while True:
-            nxt = dt + timedelta(days=delta)
-            if nxt.weekday() in (0, 3):
-                break
-            delta += 1
-    return (dt + timedelta(days=delta)).strftime("%Y-%m-%d")
-
-
 def _save_results(today: str, result: dict) -> None:
     """Save results into the draw record for today."""
     existing = get_draw_by_date(today)
@@ -116,7 +98,7 @@ def _save_results(today: str, result: dict) -> None:
         logger.info(f"Created new draw record with results for {today}")
 
     # ── Set estimated jackpot on the next draw ──
-    next_date = _next_draw_date(today)
+    next_date = next_draw_date(date.fromisoformat(today)).isoformat()
     next_draw = get_draw_by_date(next_date)
 
     snowball = result.get("snowball_amount")

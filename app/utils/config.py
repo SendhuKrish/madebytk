@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     results_retry_interval_min: int = 60
     predict_days:   str
     results_days:   str
+    draw_date_overrides: str = ""  # "expected=actual,..." for one-off postponed/preponed draws
 
     # ── Scraper ───────────────────────────────────────────────────────────────
     scraper_timeout: int
