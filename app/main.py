@@ -88,6 +88,11 @@ def _run_results_job():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not settings.scheduler_enabled:
+        logger.info("Scheduler disabled (SCHEDULER_ENABLED=false) — jobs run via external timers")
+        yield
+        return
+
     scheduler = BackgroundScheduler(timezone=settings.tz)
     scheduler.add_job(
         _run_predict_job,

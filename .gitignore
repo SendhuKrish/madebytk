@@ -19,6 +19,7 @@ ENV/
 # Environment / secrets
 .env
 .env.secret
+local.settings.json
 !.env.config
 !.env.example
 

@@ -5,8 +5,10 @@ Central configuration — reads settings from .env.config (non-sensitive) and
 
 import os
 from functools import lru_cache
+from pathlib import Path
 from pydantic_settings import BaseSettings
 
+_ROOT = Path(__file__).resolve().parents[2]  # project root, independent of CWD
 
 # Keys whose env-var must come from the env files if the shell exported a blank
 # value.  On Windows, GUI tools sometimes write empty strings that shadow file
@@ -30,6 +32,7 @@ class Settings(BaseSettings):
     environment:    str
     tz:             str
     cors_origins:   str = ""  # comma-separated; empty = no cross-origin access
+    scheduler_enabled: bool = True  # False on Azure Functions: timer triggers run the jobs
 
     # ── Anthropic ─────────────────────────────────────────────────────────────
     anthropic_api_key: str
@@ -65,7 +68,7 @@ class Settings(BaseSettings):
     claude_max_tokens: int
 
     class Config:
-        env_file          = (".env.config", ".env.secret")
+        env_file          = (_ROOT / ".env.config", _ROOT / ".env.secret")
         env_file_encoding = "utf-8"
         extra             = "ignore"
 
