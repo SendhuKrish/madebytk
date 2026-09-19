@@ -9,10 +9,9 @@ import time
 from contextlib import asynccontextmanager
 
 import anthropic
-import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import Depends, FastAPI, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -31,7 +30,7 @@ from app.services.scraper import (
 )
 from app.services.db import (
     delete_draw_by_id, fetch_all_draws, fetch_draws_without_results,
-    fetch_history, get_draw_by_date, sign_in_user, upsert_draw,
+    fetch_history, get_draw_by_date, sign_in_user, upsert_draw, verify_token,
 )
 from app.jobs.backfill_prizes import backfill_prizes as run_backfill_prizes
 
@@ -39,7 +38,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(na
 logger = logging.getLogger("toto-api")
 
 START_TIME = time.time()
-SGT = pytz.timezone(settings.tz)
 
 # ── Rule definitions for post-mortem (name, historical hold-rate %) ──
 
@@ -90,26 +88,27 @@ def _run_results_job():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler = BackgroundScheduler(timezone=SGT)
+    scheduler = BackgroundScheduler(timezone=settings.tz)
     scheduler.add_job(
         _run_predict_job,
         CronTrigger(day_of_week=settings.predict_days, hour=settings.predict_hour,
-                     minute=settings.predict_minute, timezone=SGT),
+                     minute=settings.predict_minute, timezone=settings.tz),
         id="predict", name="Generate predictions",
     )
     scheduler.add_job(
         _run_results_job,
-        CronTrigger(day_of_week=settings.results_days, hour=settings.results_hour,
-                     minute=settings.results_minute, timezone=SGT),
+        CronTrigger(day_of_week=settings.results_days,
+                     hour=f"{settings.results_hour}-{settings.results_retry_until_hour}",
+                     minute=settings.results_minute, timezone=settings.tz),
         id="results", name="Fetch results + auto-predict",
     )
     scheduler.start()
     logger.info(
         f"Scheduler started — predict {settings.predict_days} "
         f"{settings.predict_hour:02d}:{settings.predict_minute:02d}, "
-        f"results {settings.results_days} "
-        f"{settings.results_hour:02d}:{settings.results_minute:02d} "
-        f"(retry until {settings.results_retry_until_hour:02d}:00) ({settings.tz})"
+        f"results {settings.results_days} hourly "
+        f"{settings.results_hour:02d}-{settings.results_retry_until_hour:02d}h "
+        f":{settings.results_minute:02d} ({settings.tz})"
     )
     yield
     scheduler.shutdown()
@@ -124,7 +123,22 @@ app = FastAPI(
     version="4.0.0",
     lifespan=lifespan,
 )
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+    allow_methods=["*"], allow_headers=["*"],
+)
+
+
+def require_user(authorization: str | None = Header(None)) -> dict:
+    """Dependency: reject requests without a valid Supabase access token."""
+    try:
+        return verify_token((authorization or "").removeprefix("Bearer ").strip())
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+
+
+AUTH = [Depends(require_user)]
 
 
 # ── Request models ───────────────────────────────────────────────────
@@ -281,7 +295,7 @@ async def get_last_draw():
     return result
 
 
-@app.get("/predict", response_model=PredictionResponse)
+@app.get("/predict", response_model=PredictionResponse, dependencies=AUTH)
 async def predict_auto(seed: int | None = None, lines: int | None = None):
     if lines is not None and not (10 <= lines <= 40):
         raise HTTPException(400, "lines must be between 10 and 40")
@@ -297,7 +311,7 @@ async def predict_auto(seed: int | None = None, lines: int | None = None):
     )
 
 
-@app.post("/predict", response_model=PredictionResponse)
+@app.post("/predict", response_model=PredictionResponse, dependencies=AUTH)
 async def predict_manual(req: ManualPredictRequest):
     _validate_draw(req.numbers)
     return _generate_predictions(
@@ -332,7 +346,7 @@ async def postmortem(req: PostMortemRequest):
     )
 
 
-@app.post("/extract-bets")
+@app.post("/extract-bets", dependencies=AUTH)
 async def extract_bets(image: UploadFile = File(...)):
     b64 = base64.b64encode(await image.read()).decode()
     media_type = image.content_type or "image/jpeg"
@@ -373,19 +387,19 @@ async def login(req: LoginRequest):
 # ── Draw CRUD ────────────────────────────────────────────────────────
 
 
-@app.post("/draws")
+@app.post("/draws", dependencies=AUTH)
 async def save_draw(draw: dict):
     return upsert_draw(draw)
 
 
-@app.delete("/draws/{draw_id}")
+@app.delete("/draws/{draw_id}", dependencies=AUTH)
 async def remove_draw(draw_id: str):
     if not delete_draw_by_id(draw_id):
         raise HTTPException(404, "Draw not found")
     return {"message": "Deleted"}
 
 
-@app.post("/fetch-results")
+@app.post("/fetch-results", dependencies=AUTH)
 async def fetch_missing_results():
     draws = fetch_draws_without_results()
     if not draws:
@@ -417,7 +431,7 @@ async def fetch_missing_results():
     return {"message": f"Updated {updated} draw(s) with results", "updated": updated}
 
 
-@app.post("/backfill-prizes")
+@app.post("/backfill-prizes", dependencies=AUTH)
 async def backfill_prizes():
     """Fetch prize data from Lottery Extreme for all draws missing it.
 
@@ -431,7 +445,7 @@ async def backfill_prizes():
     }
 
 
-@app.post("/backfill-g1prize")
+@app.post("/backfill-g1prize", dependencies=AUTH)
 async def backfill_g1prize():
     """Backfill Group 1 Prize for all draws that have results but no group1_prize.
 

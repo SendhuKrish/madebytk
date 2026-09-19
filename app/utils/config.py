@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # ── App behaviour ─────────────────────────────────────────────────────────
     environment:    str
     tz:             str
+    cors_origins:   str = ""  # comma-separated; empty = no cross-origin access
 
     # ── Anthropic ─────────────────────────────────────────────────────────────
     anthropic_api_key: str
@@ -42,8 +43,7 @@ class Settings(BaseSettings):
     predict_minute: int
     results_hour:   int
     results_minute: int
-    results_retry_until_hour: int = 22
-    results_retry_interval_min: int = 60
+    results_retry_until_hour: int = 22  # results job runs hourly results_hour..this; last run fails loudly
     predict_days:   str
     results_days:   str
     draw_date_overrides: str = ""  # "expected=actual,..." for one-off postponed/preponed draws
@@ -59,12 +59,10 @@ class Settings(BaseSettings):
     lottery_extreme_winners_url: str
     sg_lotto_result_url: str
     toto_next_draw_url: str
-    toto_api_url: str
 
     # ── Claude AI ────────────────────────────────────────────────────────────
     claude_model: str
     claude_max_tokens: int
-    pally_api_timeout: int
 
     class Config:
         env_file          = (".env.config", ".env.secret")

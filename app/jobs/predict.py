@@ -7,8 +7,8 @@ Also triggered automatically after results are fetched.
 
 import asyncio
 import logging
-import sys
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from app.jobs.scheduling import next_draw_info
 from app.services.engine import generate_all
@@ -19,6 +19,7 @@ from app.services.db import (
     get_draw_by_date,
     upsert_draw,
 )
+from app.utils.config import settings
 
 logging.basicConfig(
     level=logging.INFO,
@@ -38,7 +39,7 @@ async def main(
     so we don't need to re-scrape external sites (which may lag behind SG Pools).
     When called standalone (scheduled cron), it scrapes as before.
     """
-    today = date.today()
+    today = datetime.now(ZoneInfo(settings.tz)).date()
     logger.info(f"Running prediction cron on {today.isoformat()}")
 
     # 1. Get latest draw numbers — use override if provided, else scrape
@@ -51,8 +52,7 @@ async def main(
     else:
         draw_data = await fetch_latest_draw()
         if not draw_data:
-            logger.error("Could not fetch latest draw data. Aborting.")
-            sys.exit(1)
+            raise RuntimeError("Could not fetch latest draw data")
 
         last_draw = sorted(draw_data["numbers"])
         next_draw_number = None

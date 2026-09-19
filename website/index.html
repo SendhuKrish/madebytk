@@ -400,6 +400,21 @@
     <script>
     (function() {
         const API = '/api';
+        let authToken = null;  // Supabase access token, held in memory only
+
+        /* Fetch with the login token attached; a 401 means it is missing/expired. */
+        async function authFetch(url, opts = {}) {
+            const headers = { ...(opts.headers || {}) };
+            if (authToken) headers.Authorization = `Bearer ${authToken}`;
+            const resp = await fetch(url, { ...opts, headers });
+            if (resp.status === 401) {
+                authToken = null; currentUser = null;
+                showPublic();
+                $('loginOverlay').classList.add('show');
+                throw new Error('Session expired — please log in again');
+            }
+            return resp;
+        }
         const $ = id => document.getElementById(id);
 
         function formatDate(dateStr) {
@@ -446,7 +461,7 @@
         }
 
         async function saveDraw(draw) {
-            const resp = await fetch(`${API}/draws`, {
+            const resp = await authFetch(`${API}/draws`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(draw),
@@ -459,7 +474,7 @@
         }
 
         async function deleteDraw(id) {
-            const resp = await fetch(`${API}/draws/${id}`, { method: 'DELETE' });
+            const resp = await authFetch(`${API}/draws/${id}`, { method: 'DELETE' });
             if (!resp.ok) {
                 const err = await resp.json().catch(() => ({}));
                 throw new Error(err.detail || 'Delete failed');
@@ -607,6 +622,7 @@
                 const data = await resp.json();
                 if (!resp.ok) throw new Error(data.detail || 'Login failed');
                 currentUser = data.user;
+                authToken = data.access_token;
                 $('loginOverlay').classList.remove('show');
                 $('loginEmail').value = ''; $('loginPass').value = '';
                 $('loginError').style.display = 'none';
@@ -619,7 +635,7 @@
             $('loginSubmit').disabled = false;
         };
 
-        $('logoutBtn').onclick = () => { currentUser = null; showPublic(); };
+        $('logoutBtn').onclick = () => { currentUser = null; authToken = null; showPublic(); };
         $('backToPublic').onclick = () => showPublic();
 
         async function showAdmin() {
@@ -629,7 +645,7 @@
                 <button class="btn-sm btn-ghost" id="navBackBtn">Public View</button>
                 <button class="btn-sm btn-logout" id="navLogoutBtn">Logout</button>`;
             $('navBackBtn').onclick = () => showPublic();
-            $('navLogoutBtn').onclick = () => { currentUser = null; showPublic(); };
+            $('navLogoutBtn').onclick = () => { currentUser = null; authToken = null; showPublic(); };
             await renderAdminDrawList();
             resetForm();
         }
@@ -679,7 +695,7 @@
             try {
                 const formData = new FormData();
                 formData.append('image', uploadedFile);
-                const response = await fetch(`${API}/extract-bets`, { method: 'POST', body: formData });
+                const response = await authFetch(`${API}/extract-bets`, { method: 'POST', body: formData });
                 if (!response.ok) { const err = await response.json(); throw new Error(err.detail || 'Server error'); }
                 extractedData = await response.json();
                 const bets = extractedData.bets || [];
@@ -818,7 +834,7 @@
         $('fetchAllResults').onclick = async () => {
             showStatus('fetchResultsStatus', 'loading', 'Fetching results...');
             try {
-                const res = await fetch(`${API}/fetch-results`, { method: 'POST' });
+                const res = await authFetch(`${API}/fetch-results`, { method: 'POST' });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.detail || 'Failed');
                 showStatus('fetchResultsStatus', 'success', data.message);
@@ -862,7 +878,7 @@
                     btn.textContent = '...';
                     btn.disabled = true;
                     try {
-                        const res = await fetch(`${API}/regenerate-predictions/${dd}`, { method: 'POST' });
+                        const res = await authFetch(`${API}/regenerate-predictions/${dd}`, { method: 'POST' });
                         if (!res.ok) { const err = await res.json(); throw new Error(err.detail || 'Failed'); }
                         const data = await res.json();
                         btn.textContent = `+${data.new}`;

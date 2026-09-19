@@ -39,7 +39,7 @@ Azure VM (dedicated — separate from Pally's VM)
 │
 ├── Cron Jobs
 │   ├── app/jobs/predict.py      → Mon & Thu 08:00 SGT — generate predictions
-│   └── app/jobs/results.py      → daily 19:00 SGT — fetch results for pending draws (retries today's hourly until 22:00)
+│   └── app/jobs/results.py      → hourly 19:00–22:00 SGT daily — single-shot; fetches results for pending draws (the schedule is the retry)
 │
 ├── Nginx
 │   └── madebytk.com             → website/ static + /api/ proxy to port 8100
@@ -83,6 +83,8 @@ docs/
 - **Supabase for storage**: Same Supabase instance as Pally but different tables (`draws`, `settings`).
 - **Frontend calls `/api/draws`**: Nginx proxies `/api/*` to the FastAPI backend.
 - **APScheduler**: Jobs run in-process via APScheduler, so `docker compose up` is all you need — no host crontab setup required.
+- **API auth**: write/costly endpoints (`POST/DELETE /draws`, `/extract-bets`, `/fetch-results`, `/backfill-*`, `/predict`) require a Supabase access token (`Authorization: Bearer`) obtained via `/auth/login`. `GET /draws`, `/health`, `/last-draw`, `/postmortem` are public.
+- **One uvicorn worker**: more than one would start duplicate schedulers.
 - **Prediction after results uses override params** — when `results.py` triggers predictions, it passes winning numbers directly to `predict.py` via `override_*` params. This avoids re-scraping external sites that may lag behind SG Pools.
 
 ## Environment Variables
@@ -93,3 +95,4 @@ Copy `.env.example` to `.env`. Required:
 |----------|---------|
 | `SUPABASE_URL` | Supabase project URL |
 | `SUPABASE_KEY` | Supabase anon key |
+| `CORS_ORIGINS` | Comma-separated browser origins allowed cross-origin (optional; same-origin nginx needs none) |

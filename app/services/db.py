@@ -94,3 +94,16 @@ def sign_in_user(email: str, password: str) -> dict:
         }
     except Exception as e:
         raise ValueError(str(e))
+
+
+def verify_token(token: str) -> dict:
+    """Validate a Supabase access token. Returns the user or raises ValueError."""
+    if not token:
+        raise ValueError("Missing bearer token")
+    try:
+        user = get_client().auth.get_user(token).user
+    except Exception as e:
+        raise ValueError("Invalid or expired token") from e
+    if not user:
+        raise ValueError("Invalid or expired token")
+    return {"id": str(user.id), "email": user.email}

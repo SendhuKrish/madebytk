@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Cron job: Fetch actual draw results and store in Supabase.
 
-Schedule: daily at 19:00 SGT. Acts only on pending draws (no results yet,
-dated today or earlier), so postponed draws are handled automatically.
-Retries hourly until ALL required data is available or deadline is reached.
+Schedule: hourly, RESULTS_HOUR to RESULTS_RETRY_UNTIL_HOUR SGT, daily. Each run
+is a single attempt (the schedule is the retry), so it works under any
+scheduler. Acts only on pending draws (no results yet, dated today or
+earlier), so postponed draws are handled automatically. The last run of the
+day raises if today's draw still has no complete results.
 No partial saves — all three fields must be present.
 After results are saved, auto-generates predictions for the next draw.
 
@@ -16,10 +18,8 @@ Required before saving:
 
 import asyncio
 import logging
-import sys
 from datetime import date, datetime
-
-import pytz
+from zoneinfo import ZoneInfo
 
 from app.jobs.scheduling import next_draw_info
 from app.services.db import fetch_draws_without_results, get_draw_by_date, upsert_draw
@@ -156,47 +156,29 @@ async def generate_next_predictions(draw_date: str, winning: list[int], draw_num
     )
 
 
-async def _fetch_complete(draw_date: str, today: str, tz) -> dict | None:
-    """Fetch complete results for one pending draw, or None if unavailable.
+async def _fetch_once(draw_date: str, today: str) -> dict | None:
+    """One attempt at complete results for a pending draw; None if unavailable."""
+    result = await _fetch_results(draw_date, today)
+    if not result:
+        logger.warning(f"{draw_date}: no results from Singapore Pools yet")
+        return None
 
-    Only today's draw is retried (hourly until the deadline). Older pending
-    draws get a single attempt per run — tomorrow's run tries them again.
-    """
-    retry_until = settings.results_retry_until_hour
-    retry_interval = settings.results_retry_interval_min
-
-    while True:
-        result = await _fetch_results(draw_date, today)
-
-        missing = ""
-        if result:
-            complete, missing = _results_complete(result)
-            if complete:
-                return result
-            logger.warning(f"{draw_date}: incomplete results — missing: {missing}")
-        else:
-            logger.warning(f"{draw_date}: no results from Singapore Pools yet")
-
-        if draw_date < today or datetime.now(tz).hour >= retry_until:
-            logger.error(
-                f"{draw_date}: giving up for this run"
-                f"{' — missing: ' + missing if result else ' — no results at all'}. "
-                f"Will retry on next scheduled run or manual trigger."
-            )
-            return None
-
-        logger.info(f"Retrying in {retry_interval} minutes (until {retry_until}:00 {settings.tz})...")
-        await asyncio.sleep(retry_interval * 60)
+    complete, missing = _results_complete(result)
+    if not complete:
+        logger.warning(f"{draw_date}: incomplete results — missing: {missing}")
+        return None
+    return result
 
 
 async def main():
     """Fetch results for every pending draw (no results yet, dated today or earlier).
 
-    Runs daily; does nothing when no draw is pending, so postponed or
-    shifted draws are picked up without any Mon/Thu assumption.
+    Does nothing when no draw is pending, so postponed or shifted draws are
+    picked up without any Mon/Thu assumption. Raises on the day's last run
+    if today's draw still has no complete results.
     """
-    tz = pytz.timezone(settings.tz)
-    today = datetime.now(tz).date().isoformat()
+    now = datetime.now(ZoneInfo(settings.tz))
+    today = now.date().isoformat()
 
     pending = sorted(
         d["draw_date"] for d in fetch_draws_without_results()
@@ -209,7 +191,7 @@ async def main():
 
     newest = None  # (draw_date, result) of the latest draw saved this run
     for draw_date in pending:
-        result = await _fetch_complete(draw_date, today, tz)
+        result = await _fetch_once(draw_date, today)
         if result:
             logger.info(f"{draw_date} results: {result['winning']} +{result['additional']}")
             await _save_results(draw_date, result)
@@ -220,7 +202,10 @@ async def main():
         await generate_next_predictions(draw_date, result["winning"], result.get("draw_number"))
 
     if today in pending and (not newest or newest[0] != today):
-        sys.exit(1)  # today's draw still has no results — surface the failure
+        if now.hour >= settings.results_retry_until_hour:
+            raise RuntimeError(f"No complete results for {today} by {settings.results_retry_until_hour}:00")
+        logger.info("Today's draw not ready — the next hourly run will retry")
+        return
     logger.info("Results cron complete")
 
 

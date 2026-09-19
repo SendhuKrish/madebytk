@@ -13,5 +13,5 @@ COPY app/ ./app/
 # Expose the API port
 EXPOSE 8100
 
-# Start uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "2"]
+# Start uvicorn — ONE worker: each worker would start its own APScheduler and double-fire every job
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8100", "--workers", "1"]
