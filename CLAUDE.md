@@ -37,9 +37,9 @@ Azure VM (dedicated — separate from Pally's VM)
 │   ├── POST /postmortem         → analyze past predictions
 │   └── GET  /health             → status check
 │
-├── Cron Jobs (Mon & Thu)
-│   ├── app/jobs/predict.py      → 08:00 SGT — generate predictions
-│   └── app/jobs/results.py      → 19:00 SGT — fetch results from SG Pools (retries hourly until 22:00)
+├── Cron Jobs
+│   ├── app/jobs/predict.py      → Mon & Thu 08:00 SGT — generate predictions
+│   └── app/jobs/results.py      → daily 19:00 SGT — fetch results for pending draws (retries today's hourly until 22:00)
 │
 ├── Nginx
 │   └── madebytk.com             → website/ static + /api/ proxy to port 8100
