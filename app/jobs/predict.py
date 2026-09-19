@@ -7,9 +7,10 @@ Also triggered automatically after results are fetched.
 
 import asyncio
 import logging
-import sys
-from datetime import date, timedelta
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
+from app.jobs.scheduling import next_draw_info
 from app.services.engine import generate_all
 from app.services.scraper import fetch_latest_draw
 from app.services.db import (
@@ -26,22 +27,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("cron-predict")
 
-# Map day abbreviations to weekday numbers (mon=0 ... sun=6)
-_DAY_MAP = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
-
-
-def _next_draw_date(after: date) -> date:
-    """Calculate the next draw date strictly after `after`, based on PREDICT_DAYS."""
-    draw_weekdays = sorted(
-        _DAY_MAP[d.strip().lower()] for d in settings.predict_days.split(",")
-    )
-    for offset in range(1, 8):
-        candidate = after + timedelta(days=offset)
-        if candidate.weekday() in draw_weekdays:
-            return candidate
-    # Fallback: shouldn't happen with valid config
-    return after + timedelta(days=1)
-
 
 async def main(
     override_numbers: list[int] | None = None,
@@ -54,7 +39,7 @@ async def main(
     so we don't need to re-scrape external sites (which may lag behind SG Pools).
     When called standalone (scheduled cron), it scrapes as before.
     """
-    today = date.today()
+    today = datetime.now(ZoneInfo(settings.tz)).date()
     logger.info(f"Running prediction cron on {today.isoformat()}")
 
     # 1. Get latest draw numbers — use override if provided, else scrape
@@ -67,8 +52,7 @@ async def main(
     else:
         draw_data = await fetch_latest_draw()
         if not draw_data:
-            logger.error("Could not fetch latest draw data. Aborting.")
-            sys.exit(1)
+            raise RuntimeError("Could not fetch latest draw data")
 
         last_draw = sorted(draw_data["numbers"])
         next_draw_number = None
@@ -85,8 +69,9 @@ async def main(
         except (ValueError, TypeError):
             pass
 
-    target_date = _next_draw_date(last_draw_date)
-    target_date_str = target_date.isoformat()
+    info = await next_draw_info(last_draw_date)
+    target_date_str = info["date"].isoformat()
+    jackpot_est = info["jackpot_est"]
     logger.info(f"Predictions target draw date: {target_date_str}")
 
     # Guard: don't skip ahead if an earlier draw still has no results.
@@ -122,15 +107,22 @@ async def main(
         existing["predictions"] = predictions
         if next_draw_number and not existing.get("draw_number"):
             existing["draw_number"] = next_draw_number
+        if jackpot_est is not None:
+            results = existing.get("results") or {}
+            results["estimated_jackpot"] = jackpot_est
+            existing["results"] = results
         upsert_draw(existing)
         logger.info(f"Updated existing draw record for {target_date_str}")
     else:
+        results_data = {"winning": [], "additional": None}
+        if jackpot_est is not None:
+            results_data["estimated_jackpot"] = jackpot_est
         draw_record = {
             "draw_date": target_date_str,
             "draw_number": next_draw_number or "",
             "predictions": predictions,
             "bets": [],
-            "results": {"winning": [], "additional": None},
+            "results": results_data,
         }
         upsert_draw(draw_record)
         logger.info(f"Created new draw record for {target_date_str}")
