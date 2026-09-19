@@ -28,6 +28,25 @@ SGT is UTC+8 with no DST, so the UTC schedules are stable. If you change
 `RESULTS_HOUR` / `RESULTS_RETRY_UNTIL_HOUR`, change `RESULTS_SCHEDULE` to match
 (the last run of the day is the one that raises on missing results).
 
+## Scale settings (Flex Consumption)
+
+Function App → Scale and concurrency. These values matter:
+
+| Setting | Value |
+|---|---|
+| Instance memory | 2048 MB |
+| HTTP concurrency | **Assign manually: 16** |
+| On-demand maximum instance count | **4** |
+| Always-ready instances | none (about $20/month at 2 GB, more than the VM it replaces) |
+
+With HTTP concurrency on "system-assigned" and the max instance count at 1–2, the
+platform held requests before they reached the Functions host: random 60 s hangs
+ending in 503, or a fixed ~5 s on every request once an always-ready instance was
+added. App Insights showed the host handling each request in about 3 ms, so the
+delay was upstream of the host and not in the app. Setting both values above fixed
+it. After 10 idle minutes the first request takes about 4 s (cold start), then
+about 0.13 s.
+
 ## Parallel run with the VM
 
 Predictions are random, so two live schedulers would overwrite each other. While
