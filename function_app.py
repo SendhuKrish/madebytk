@@ -15,13 +15,6 @@ from app.main import app as fastapi_app
 app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
-# TEMPORARY diagnostic: a plain (non-ASGI) HTTP function, to tell adapter/FastAPI
-# latency apart from platform/worker latency. Remove once the 5s delay is understood.
-@app.route(route="probe", methods=["GET"])
-def probe(req: func.HttpRequest) -> func.HttpResponse:
-    return func.HttpResponse("ok")
-
-
 # use_monitor=False: don't fire a "missed" run after a restart — predictions
 # are random, so an extra run would overwrite good ones.
 @app.timer_trigger(schedule="%PREDICT_SCHEDULE%", arg_name="timer", use_monitor=False)
