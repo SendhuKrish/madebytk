@@ -397,9 +397,10 @@
         <p>&copy; 2026 <a href="https://madebytk.com">madebytk.com</a> · <a href="https://curiouscabinet.tools" target="_blank">CuriousCabinet.tools</a></p>
     </footer>
 
+    <script src="config.js"></script>
     <script>
     (function() {
-        const API = '/api';
+        const API = window.API_BASE || '/api';  // set in config.js
         let authToken = null;  // Supabase access token, held in memory only
 
         /* Fetch with the login token attached; a 401 means it is missing/expired. */
