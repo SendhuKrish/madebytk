@@ -769,11 +769,11 @@
                 <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem;">
                     <label style="font-size:.82rem;color:var(--text-dim);">Draw Date:
                         <input type="date" value="${d.draw_date || ''}" style="font-weight:700;font-size:.82rem;padding:.15rem .3rem;border:1.5px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;"
-                            onchange="extractedData.draw_date=this.value">
+                            onchange="setExtractedField('draw_date', this.value)">
                     </label>
                     <label style="font-size:.82rem;color:var(--text-dim);">Draw #:
                         <input type="text" value="${d.draw_number || ''}" style="width:60px;font-weight:700;font-size:.82rem;padding:.15rem .3rem;border:1.5px solid var(--border);border-radius:4px;font-family:'JetBrains Mono',monospace;"
-                            onchange="extractedData.draw_number=this.value">
+                            onchange="setExtractedField('draw_number', this.value)">
                     </label>
                 </div>`;
         }
@@ -816,6 +816,12 @@
             }
             extractedData.bets[idx] = { type: newType, numbers: newNums };
             renderBetList();
+        };
+
+        // Inline onchange="" attributes run in global scope and can't see
+        // extractedData (a closure variable), so field edits need a global setter.
+        window.setExtractedField = function(field, value) {
+            if (extractedData) extractedData[field] = value;
         };
 
         window.deleteBet = function(idx) {
