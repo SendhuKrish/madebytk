@@ -324,6 +324,40 @@ async def predict_manual(req: ManualPredictRequest):
     )
 
 
+@app.post("/regenerate-predictions/{draw_date}", dependencies=AUTH)
+async def regenerate_predictions(draw_date: str):
+    """Generate another batch of prediction lines for an existing draw and
+    append them to it (admin "Re-predict" button — adds more options, does
+    not replace what's already there).
+
+    Scores against the most recent completed draw strictly before draw_date,
+    so this reflects that draw's own position in history, not "the next draw"
+    (which is what the predict cron computes via next_draw_info()).
+    """
+    draw = get_draw_by_date(draw_date)
+    if not draw:
+        raise HTTPException(404, f"No draw found for {draw_date}")
+
+    prior = [
+        d for d in fetch_all_draws()
+        if d["draw_date"] < draw_date
+        and len((d.get("results") or {}).get("winning") or []) == 6
+    ]
+    if not prior:
+        raise HTTPException(400, f"No completed draw before {draw_date} to predict from")
+
+    history = [sorted(int(n) for n in d["results"]["winning"]) for d in prior]
+    last_draw = history[0]
+
+    concentrated, diverse, low_skew, synthesis, _ = generate_all(last_draw, history=history)
+    new_predictions = [r.pick for group in (concentrated, diverse, low_skew, synthesis) for r in group]
+
+    draw["predictions"] = (draw.get("predictions") or []) + new_predictions
+    upsert_draw(draw)
+
+    return {"message": f"Added {len(new_predictions)} prediction line(s)", "new": len(new_predictions)}
+
+
 @app.post("/postmortem", response_model=PostMortemResponse)
 async def postmortem(req: PostMortemRequest):
     _validate_draw(req.previous_draw)
